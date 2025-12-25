@@ -3,110 +3,101 @@ import redis
 import json
 import time
 import os
-import pandas as pd
+from PIL import Image
 
-# Page Config (The Title Bar)
-st.set_page_config(
-    page_title="ForwardFin Terminal",
-    page_icon="🔮",
-    layout="wide"
-)
+# --- CONFIGURATION ---
+# Set page to wide mode by default
+st.set_page_config(page_title="ForwardFin AI", layout="wide")
 
-# Custom CSS to make it look like a pro terminal
-st.markdown("""
-<style>
-    .stMetric {
-        background-color: #0E1117;
-        padding: 15px;
-        border-radius: 5px;
-        border: 1px solid #262730;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Connect to Redis
+# Connect to Redis (Cloud or Local)
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-r = redis.Redis(host=REDIS_HOST, port=6379, db=0)
-pubsub = r.pubsub()
-pubsub.subscribe('narrative_results')
+try:
+    r = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
+    r.ping() # Test connection
+except:
+    st.error(f"❌ Could not connect to Redis at {REDIS_HOST}. Is it running?")
+    st.stop()
 
-# --- SIDEBAR ---
-with st.sidebar:
-    st.title("🔮 ForwardFin")
-    st.caption("AI-Powered Trading Assistant")
-    st.markdown("---")
-    st.header("System Health")
-    st.success("🟢 Ingestion: Active")
-    st.success("🟢 Analysis: Active")
-    st.success("🟢 AI Brain: Active")
-    st.markdown("---")
-    st.info(f"📡 Connected to: {REDIS_HOST}")
+# --- HEADER SECTION (Logo + Title) ---
+# We use columns to place logo next to title
+col1, col2 = st.columns([1, 6]) # col2 is 6 times wider than col1
 
-# --- MAIN LOOP SETUP ---
-st.title("Live Market Intelligence")
+with col1:
+    try:
+        # Try to load the logo
+        # Since we run from root, the path is services/frontend/assets/logo.png
+        image = Image.open('services/frontend/assets/logo.png')
+        st.image(image, use_column_width=True)
+    except FileNotFoundError:
+        # If logo isn't there yet, just show an emoji placeholder
+        st.header("🤖")
 
-# We create a SINGLE empty container that holds the whole dashboard
-# This prevents the "stacking" glitch
-dashboard_placeholder = st.empty()
+with col2:
+    st.title("ForwardFin AI Terminal")
+    st.markdown("*Real-Time Institutional Grade Analytics*")
 
-# Initialize session state for the chart
-if 'chart_data' not in st.session_state:
-    st.session_state['chart_data'] = []
+st.divider() # A nice line separator
 
-def get_redis_data():
-    message = pubsub.get_message()
-    if message and message['type'] == 'message':
-        return json.loads(message['data'])
-    return None
+# --- MAIN CONTENT LAYOUT ---
+# Create a 2-column layout for the main dashboard
+# Left column gets 2 parts width, Right column gets 1 part width
+left_col, right_col = st.columns([2, 1])
 
-# --- THE GAME LOOP ---
-while True:
-    data = get_redis_data()
+# Placeholder containers so we can update data live without refreshing
+with left_col:
+    st.subheader("📡 Market Data Stream")
+    price_container = st.empty()
+    chart_container = st.empty()
+
+with right_col:
+    st.subheader("🧠 AI Neural Net")
+    prediction_container = st.empty()
+    st.divider()
+    st.subheader("📰 Narrative Desk")
+    narrative_container = st.empty()
+
+# --- THE LIVE LOOP ---
+# This runs every time Streamlit refreshes (about every few seconds)
+
+# 1. FETCH DATA from Redis
+price_data = r.get("latest_price")
+prediction_data = r.get("latest_prediction")
+narrative_data = r.get("latest_narrative")
+
+# 2. RENDER PRICE
+if price_data:
+    data = json.loads(price_data)
+    price = float(data['price'])
+    rsi = float(data['indicators']['rsi'])
+    macd = float(data['indicators']['macd'])
     
-    if data:
-        # Update Chart History
-        st.session_state['chart_data'].append(data['probability'])
-        if len(st.session_state['chart_data']) > 100:
-            st.session_state['chart_data'].pop(0)
+    with price_container.container():
+        # Use BIG metric display
+        st.metric(label="BTC-USD Price", value=f"${price:,.2f}", delta=f"RSI: {rsi:.1f}")
+        st.caption(f"MACD Momentum: {macd:.4f}")
 
-        # Update the Dashboard inside the placeholder
-        with dashboard_placeholder.container():
-            # 1. KPI Row
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric("Asset", data['symbol'])
-            
-            with col2:
-                # Color code the bias
-                bias_color = "normal"
-                if data['bias'] == "BULLISH": bias_color = "off" # Streamlit handles green automatically for + delta
-                st.metric("AI Bias", data['bias'], delta=data['bias'])
+# 3. RENDER AI PREDICTION
+if prediction_data:
+    pred = json.loads(prediction_data)
+    bias = pred['bias']
+    prob = pred['probability']
+    
+    # Color-code the result
+    color = "green" if bias == "BULLISH" else "red"
+    
+    with prediction_container.container():
+        st.markdown(f"### Signal: :{color}[{bias}]")
+        st.progress(prob / 100)
+        st.caption(f"Confidence: {prob}%")
 
-            with col3:
-                # Clean up the long decimal number
-                prob = float(data['probability'])
-                st.metric("Confidence", f"{prob:.1f}%")
-                
-            with col4:
-                 st.metric("Signal Source", "XGBoost + MACD")
+# 4. RENDER NARRATIVE
+if narrative_data:
+    with narrative_container.container():
+        # Display as a nice block quote
+        st.info(narrative_data.strip('"'))
+else:
+    narrative_container.caption("Waiting for market synthesis...")
 
-            st.markdown("---")
-
-            # 2. Main Layout (Chart + Story)
-            chart_col, story_col = st.columns([2, 1])
-            
-            with chart_col:
-                st.subheader("⚠️ Confidence Trend")
-                # Create a simple dataframe for the chart
-                df = pd.DataFrame(st.session_state['chart_data'], columns=["Bullish Probability"])
-                st.line_chart(df)
-
-            with story_col:
-                st.subheader("📝 AI Narrative")
-                st.info(f"**{data['headline']}**")
-                st.write(data['story'])
-                st.caption("Updated just now")
-
-    # Sleep briefly to save CPU
-    time.sleep(0.1)
+# Auto-refresh the page every 2 seconds to pick up new Redis data
+time.sleep(2)
+st.rerun()
