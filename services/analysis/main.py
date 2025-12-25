@@ -1,99 +1,89 @@
-import asyncio
-import json
 import redis
+import json
+import time
 import os
-import talib
+import pandas as pd
 import numpy as np
 
 # Connect to Redis
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 r = redis.Redis(host=REDIS_HOST, port=6379, db=0)
-pubsub = r.pubsub()
 
-# We keep a slightly longer history now for accurate MACD
+print("🧮 Analysis Engine: Ready to crunch numbers...")
+
+# We need a small memory to calculate trends (RSI needs 14 previous numbers)
 price_history = []
 
-async def analyze_market():
-    print(f"🧠 Analysis Service (Advanced) Connected to Redis at {REDIS_HOST}")
-    pubsub.subscribe('market_data')
-    print("Waiting for data stream...")
+def calculate_rsi(prices, period=14):
+    if len(prices) < period:
+        return 50  # Default neutral
+    
+    # Create a pandas Series for easy math
+    series = pd.Series(prices)
+    delta = series.diff()
+    
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
 
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    
+    # Handle division by zero or NaN
+    return rsi.iloc[-1] if not pd.isna(rsi.iloc[-1]) else 50
+
+def calculate_macd(prices):
+    if len(prices) < 26:
+        return 0
+        
+    series = pd.Series(prices)
+    exp1 = series.ewm(span=12, adjust=False).mean()
+    exp2 = series.ewm(span=26, adjust=False).mean()
+    macd = exp1 - exp2
+    return macd.iloc[-1]
+
+def process_stream():
+    pubsub = r.pubsub()
+    pubsub.subscribe('market_data')
+    
     for message in pubsub.listen():
-        if message['type'] == 'message':
+        if message['type'] != 'message':
+            continue
+
+        try:
             # 1. Parse Data
-            raw_data = json.loads(message['data'])
-            price = float(raw_data['price'])
-            symbol = raw_data['symbol']
+            data = json.loads(message['data'])
+            price = float(data['price'])
             
-            # 2. Update History
+            # 2. Add to History (Keep last 50 prices)
             price_history.append(price)
-            # MACD needs 26 periods + signal (approx 35 data points minimum to start)
-            if len(price_history) > 50: 
+            if len(price_history) > 50:
                 price_history.pop(0)
 
-            # 3. Calculate Indicators (Defaults)
-            indicators = {
-                "rsi": 0, "sma": 0, "macd": 0, "macd_signal": 0, 
-                "upper_band": 0, "lower_band": 0, "roc": 0
-            }
-            signal = "WAIT (Gathering Data...)"
+            # 3. Calculate Indicators (Using Pandas)
+            rsi = calculate_rsi(price_history)
+            macd = calculate_macd(price_history)
             
-            # Convert to numpy for TA-Lib
-            np_prices = np.array(price_history, dtype='float')
+            # Determine Signal
+            signal = "NEUTRAL"
+            if rsi > 70: signal = "SELL"
+            elif rsi < 30: signal = "BUY"
 
-            # --- THE MATH LAB ---
-            if len(price_history) >= 35:
-                # A. RSI (14) - Momentum
-                indicators['rsi'] = talib.RSI(np_prices, timeperiod=14)[-1]
-                
-                # B. SMA (20) - Trend
-                indicators['sma'] = talib.SMA(np_prices, timeperiod=20)[-1]
+            print(f"📊 {data['symbol']} | RSI: {rsi:.2f} | MACD: {macd:.2f} | Sig: {signal}")
 
-                # C. MACD (12, 26, 9) - Trend Reversal
-                macd, macd_signal, _ = talib.MACD(np_prices, fastperiod=12, slowperiod=26, signalperiod=9)
-                indicators['macd'] = macd[-1]
-                indicators['macd_signal'] = macd_signal[-1]
-
-                # D. Bollinger Bands (20, 2 std dev) - Volatility
-                upper, middle, lower = talib.BBANDS(np_prices, timeperiod=20, nbdevup=2, nbdevdn=2)
-                indicators['upper_band'] = upper[-1]
-                indicators['lower_band'] = lower[-1]
-                
-                # E. ROC (Rate of Change) - Velocity
-                indicators['roc'] = talib.ROC(np_prices, timeperiod=10)[-1]
-
-                # --- THE COACH'S LOGIC ---
-                # Default
-                signal = "NEUTRAL"
-
-                # Logic 1: RSI Extremes (Reversion)
-                if indicators['rsi'] > 75:
-                    signal = "SELL (Overbought + Hype)"
-                elif indicators['rsi'] < 25:
-                    signal = "BUY (Oversold + Fear)"
-                
-                # Logic 2: Bollinger Band Squeeze (Breakout)
-                # If price breaks the upper band, it's a breakout
-                elif price > indicators['upper_band']:
-                    signal = "BUY (Volatility Breakout)"
-                
-                # Logic 3: MACD Crossover (Trend Shift)
-                # If MACD line crosses ABOVE Signal line
-                elif indicators['macd'] > indicators['macd_signal'] and indicators['macd'] < 0:
-                     signal = "BUY (Momentum Recovery)"
-
-            # 4. Publish Advanced Insight
-            output = {
-                "symbol": symbol,
+            # 4. Publish Results
+            analysis_packet = {
+                "symbol": data['symbol'],
                 "price": price,
-                "indicators": {k: round(v, 2) for k, v in indicators.items()},
-                "signal": signal
+                "indicators": {
+                    "rsi": rsi,
+                    "macd": macd,
+                    "signal": signal
+                }
             }
-            
-            # Print a clean dashboard line
-            print(f"💵 ${price} | RSI: {output['indicators']['rsi']} | MACD: {output['indicators']['macd']} | Sig: {signal}")
-            
-            r.publish("analysis_results", json.dumps(output))
+            r.publish('analysis_results', json.dumps(analysis_packet))
+
+        except Exception as e:
+            print(f"❌ Analysis Error: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(analyze_market())
+    process_stream()
