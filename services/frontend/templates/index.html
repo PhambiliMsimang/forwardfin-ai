@@ -3,583 +3,165 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ForwardFin | AI-Powered Trading Architecture</title>
+    <title>ForwardFin | Live AI Terminal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f8fafc; /* slate-50 */
-            color: #334155; /* slate-700 */
-        }
-        /* Chart Container Utilities */
-        .chart-container {
-            position: relative;
-            width: 100%;
-            max-width: 600px; /* Constraint for large screens */
-            margin-left: auto;
-            margin-right: auto;
-            height: 300px;
-        }
-        @media (min-width: 768px) {
-            .chart-container {
-                height: 350px;
-            }
-        }
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; color: #334155; }
+        .chart-container { position: relative; width: 100%; max-width: 600px; margin: auto; height: 300px; }
+        @media (min-width: 768px) { .chart-container { height: 350px; } }
         
-        /* Interactive Card Styling */
-        .arch-layer {
-            transition: all 0.3s ease;
-            cursor: pointer;
-            border-left: 4px solid transparent;
-        }
-        .arch-layer:hover {
-            background-color: #f1f5f9; /* slate-100 */
-            transform: translateX(4px);
-        }
-        .arch-layer.active {
-            background-color: #e0f2fe; /* sky-100 */
-            border-left-color: #0284c7; /* sky-600 */
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        }
+        /* Smooth fade for updates */
+        .live-update { transition: all 0.5s ease; }
+        .flash-green { animation: flashG 1s; }
+        .flash-red { animation: flashR 1s; }
+        
+        @keyframes flashG { 0% { color: #10b981; } 100% { color: inherit; } }
+        @keyframes flashR { 0% { color: #f43f5e; } 100% { color: inherit; } }
 
-        /* Custom Scrollbar for detail panels */
-        .custom-scroll::-webkit-scrollbar {
-            width: 6px;
-        }
-        .custom-scroll::-webkit-scrollbar-track {
-            background: #f1f5f9; 
-        }
-        .custom-scroll::-webkit-scrollbar-thumb {
-            background: #cbd5e1; 
-            border-radius: 3px;
-        }
-        .custom-scroll::-webkit-scrollbar-thumb:hover {
-            background: #94a3b8; 
-        }
-
-        /* Animation utilities */
-        .fade-in {
-            animation: fadeIn 0.5s ease-in-out;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
+        /* Custom Scrollbar */
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
     </style>
-    <!-- Chosen Palette: Warm Neutrals & Professional Blue -->
-    <!-- Background: Slate-50 (Warm Grey/White) -->
-    <!-- Primary Text: Slate-800 -->
-    <!-- Accent: Sky-600 (Trust/Tech) -->
-    <!-- Success: Emerald-500 (Growth/Profit) -->
-    
-    <!-- Application Structure Plan: 
-         1. Hero: Immediate value prop + "Confidence Meter" viz.
-         2. Problem/Solution: Interactive toggle comparison.
-         3. Architecture Builder: Vertical interactive stack representing the 5 layers. Clicking a layer updates a side panel with technical details (answering "how to build").
-         4. Simulation: A "Try it" section that runs a mock analysis pipeline and generates a "Trade Card".
-         5. Roadmap/Security: Grid layout for static info.
-         Rationale: This structure moves from "Why" to "How" (Architecture) to "What" (Simulation), catering to both the user wanting to understand the product and the developer wanting to know how it's built.
-    -->
 </head>
 <body class="bg-slate-50 text-slate-800 antialiased flex flex-col min-h-screen">
 
-    <!-- Navigation -->
     <nav class="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-200 shadow-sm">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16 items-center">
-                <div class="flex items-center gap-2">
-                    <div class="w-8 h-8 bg-sky-600 rounded-lg flex items-center justify-center text-white font-bold">F</div>
-                    <span class="font-bold text-xl tracking-tight text-slate-900">ForwardFin</span>
+                <div class="flex items-center gap-4">
+                    <img src="/static/logo.png" alt="FF Logo" class="h-10 w-auto">
+                    <div class="hidden md:block h-6 w-px bg-slate-300"></div>
+                    <div id="nav-ticker" class="font-mono text-sm font-bold text-slate-600 flex items-center gap-2">
+                        <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        Connecting...
+                    </div>
                 </div>
-                <div class="hidden md:flex space-x-8 text-sm font-medium text-slate-600">
-                    <a href="#overview" class="hover:text-sky-600 transition-colors">Overview</a>
-                    <a href="#architecture" class="hover:text-sky-600 transition-colors">System Architecture</a>
-                    <a href="#simulation" class="hover:text-sky-600 transition-colors">Live Demo</a>
-                    <a href="#security" class="hover:text-sky-600 transition-colors">Security</a>
-                </div>
-                <button onclick="document.getElementById('simulation').scrollIntoView({behavior: 'smooth'})" class="bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-full text-sm font-medium transition-all shadow-md hover:shadow-lg">
-                    See How It Works
+                <button onclick="document.getElementById('simulation').scrollIntoView({behavior: 'smooth'})" class="bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-full text-sm font-medium shadow-md">
+                    Live Terminal
                 </button>
             </div>
         </div>
     </nav>
 
-    <!-- Main Content -->
     <main class="flex-grow">
 
-        <!-- Hero Section -->
         <section id="overview" class="pt-20 pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
                 <div class="space-y-6">
-                    <div class="inline-flex items-center px-3 py-1 rounded-full bg-sky-100 text-sky-800 text-xs font-semibold uppercase tracking-wide">
-                        AI-Powered Trading Assistant
+                    <div id="hero-badge" class="inline-flex items-center px-3 py-1 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold uppercase tracking-wide">
+                        System Status: Initializing...
                     </div>
                     <h1 class="text-4xl sm:text-5xl font-extrabold text-slate-900 leading-tight">
                         Trading logic,<br>
-                        <span class="text-sky-600">minus the guesswork.</span>
+                        <span class="text-sky-600">powered by Real-Time AI.</span>
                     </h1>
-                    <p class="text-lg text-slate-600 leading-relaxed max-w-lg">
-                        ForwardFin analyzes live market data, breaks down opportunities, and explains the "Why" in simple language. We don't trade for you; we give you the confidence to trade yourself.
+                    <p class="text-lg text-slate-600 max-w-lg">
+                        ForwardFin is currently tracking <strong>BTC-USD</strong> live on the backend. 
+                        The gauge on the right reflects the neural network's current confidence in a directional move.
                     </p>
-                    <div class="flex flex-col sm:flex-row gap-4 pt-4">
-                        <div class="flex items-center gap-3">
-                            <div class="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
-                                <span class="text-lg font-bold">✓</span>
-                            </div>
-                            <span class="text-sm font-medium text-slate-700">72% Probability Insights</span>
-                        </div>
-                        <div class="flex items-center gap-3">
-                            <div class="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-600">
-                                <span class="text-lg font-bold">!</span>
-                            </div>
-                            <span class="text-sm font-medium text-slate-700">Risk Explained Simply</span>
-                        </div>
-                    </div>
                 </div>
 
-                <!-- Hero Viz: Probability Meter -->
                 <div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
                     <div class="text-center mb-4">
-                        <h3 class="text-sm font-semibold text-slate-500 uppercase">ForwardFin Insight Engine</h3>
-                        <p class="text-xl font-bold text-slate-800">Trade Probability Analysis</p>
+                        <h3 class="text-sm font-semibold text-slate-500 uppercase">Current AI Confidence</h3>
+                        <p id="hero-bias" class="text-xl font-bold text-slate-800">WAITING FOR DATA...</p>
                     </div>
-                    <div class="chart-container">
+                    <div class="chart-container" style="height: 250px;">
                         <canvas id="heroChart"></canvas>
                     </div>
-                    <div class="mt-4 text-center">
-                        <p class="text-sm text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-200">
-                            "This trade has a <strong class="text-sky-600">72% chance</strong> of success based on current momentum and volume indicators."
-                        </p>
-                    </div>
                 </div>
             </div>
         </section>
 
-        <!-- Problem vs Solution (Interactive Toggle) -->
-        <section class="bg-white py-16 border-y border-slate-200">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="text-center mb-12">
-                    <h2 class="text-3xl font-bold text-slate-900">The Problem We Solve</h2>
-                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">
-                        Most people want to invest but are held back by complexity and fear. Toggle below to see the difference.
-                    </p>
-                </div>
-
-                <div class="flex justify-center mb-8">
-                    <div class="bg-slate-100 p-1 rounded-lg inline-flex relative">
-                        <div id="slider-bg" class="absolute top-1 left-1 w-1/2 h-[calc(100%-8px)] bg-white rounded-md shadow-sm transition-all duration-300"></div>
-                        <button onclick="toggleView('problem')" class="relative z-10 px-6 py-2 text-sm font-medium text-slate-900 rounded-md transition-colors w-40" id="btn-problem">The Old Way</button>
-                        <button onclick="toggleView('solution')" class="relative z-10 px-6 py-2 text-sm font-medium text-slate-500 rounded-md transition-colors w-40" id="btn-solution">With ForwardFin</button>
-                    </div>
-                </div>
-
-                <div id="content-display" class="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6 fade-in">
-                    <!-- Dynamic Content populated by JS -->
-                </div>
-            </div>
-        </section>
-
-        <!-- System Architecture (The "How-To Build" Guide) -->
-        <section id="architecture" class="py-16 bg-slate-50">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="mb-10">
-                    <h2 class="text-3xl font-bold text-slate-900">Core Architecture</h2>
-                    <p class="mt-4 text-slate-600 max-w-3xl">
-                        ForwardFin is built as a decision-support system, not a trading bot. Explore the 5-layer stack below to understand how the system is engineered from the ground up.
-                        <br><span class="text-sm text-sky-600 italic">Click on any layer to see technical details.</span>
-                    </p>
-                </div>
-
-                <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                    <!-- Left Column: Interactive Stack -->
-                    <div class="lg:col-span-5 space-y-3">
-                        <div onclick="selectLayer(0)" class="arch-layer active bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
-                            <div>
-                                <h4 class="font-bold text-slate-800">1. Data Ingestion Layer</h4>
-                                <p class="text-xs text-slate-500 mt-1">Raw Market Data & Sentiment</p>
-                            </div>
-                            <div class="text-slate-300 group-hover:text-sky-500 transition-colors text-xl">→</div>
-                        </div>
-                        <div onclick="selectLayer(1)" class="arch-layer bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
-                            <div>
-                                <h4 class="font-bold text-slate-800">2. Analysis & Feature Eng.</h4>
-                                <p class="text-xs text-slate-500 mt-1">Indicators, Volatility, Regimes</p>
-                            </div>
-                            <div class="text-slate-300 group-hover:text-sky-500 transition-colors text-xl">→</div>
-                        </div>
-                        <div onclick="selectLayer(2)" class="arch-layer bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
-                            <div>
-                                <h4 class="font-bold text-slate-800">3. AI / ML Inference Engine</h4>
-                                <p class="text-xs text-slate-500 mt-1">Probabilistic Models & Bias</p>
-                            </div>
-                            <div class="text-slate-300 group-hover:text-sky-500 transition-colors text-xl">→</div>
-                        </div>
-                        <div onclick="selectLayer(3)" class="arch-layer bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
-                            <div>
-                                <h4 class="font-bold text-slate-800">4. Reasoning Layer</h4>
-                                <p class="text-xs text-slate-500 mt-1">Natural Language Explanation</p>
-                            </div>
-                            <div class="text-slate-300 group-hover:text-sky-500 transition-colors text-xl">→</div>
-                        </div>
-                        <div onclick="selectLayer(4)" class="arch-layer bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
-                            <div>
-                                <h4 class="font-bold text-slate-800">5. User Interaction Layer</h4>
-                                <p class="text-xs text-slate-500 mt-1">The Human Interface</p>
-                            </div>
-                            <div class="text-slate-300 group-hover:text-sky-500 transition-colors text-xl">→</div>
-                        </div>
-                    </div>
-
-                    <!-- Right Column: Detail Panel -->
-                    <div class="lg:col-span-7">
-                        <div class="bg-white rounded-xl shadow-lg border border-slate-200 h-full overflow-hidden flex flex-col">
-                            <div class="p-6 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                                <h3 id="detail-title" class="text-xl font-bold text-slate-800">Data Ingestion Layer</h3>
-                                <span id="detail-badge" class="px-2 py-1 bg-sky-100 text-sky-700 text-xs rounded font-mono">Backend / Infrastructure</span>
-                            </div>
-                            <div class="p-6 flex-grow custom-scroll overflow-y-auto">
-                                <p id="detail-desc" class="text-slate-600 mb-6">
-                                    The foundation of the system. This layer is responsible for normalizing and streaming data into the analysis pipeline. It handles real-time websockets for price action and REST APIs for fundamental data.
-                                </p>
-                                
-                                <h5 class="font-semibold text-slate-800 mb-3 text-sm uppercase tracking-wider">Key Components</h5>
-                                <ul id="detail-list" class="space-y-3 mb-6">
-                                    <!-- List items populated by JS -->
-                                </ul>
-
-                                <div class="bg-slate-50 p-4 rounded-lg border border-slate-200">
-                                    <h5 class="font-semibold text-slate-800 mb-2 text-sm">Why it matters:</h5>
-                                    <p id="detail-purpose" class="text-sm text-slate-600 italic">
-                                        Garbage in, garbage out. High-quality, normalized data is essential for accurate ML predictions.
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Simulation Demo Section -->
-        <section id="simulation" class="py-20 bg-white border-t border-slate-200">
+        <section id="simulation" class="py-20 bg-slate-900 text-white">
             <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-10">
-                    <h2 class="text-3xl font-bold text-slate-900">Experience the Logic</h2>
-                    <p class="mt-2 text-slate-600">Simulate a live analysis to see how ForwardFin breaks down a trade.</p>
+                    <h2 class="text-3xl font-bold">Live Market Breakdown</h2>
+                    <p class="mt-2 text-slate-400">Click below to ask the AI for a fresh analysis of the current market state.</p>
                 </div>
 
-                <div class="bg-slate-900 rounded-2xl shadow-2xl overflow-hidden text-white relative min-h-[500px] flex flex-col">
+                <div class="bg-slate-800 rounded-2xl shadow-2xl overflow-hidden relative min-h-[500px] flex flex-col border border-slate-700">
                     
-                    <!-- Controls -->
-                    <div class="p-4 border-b border-slate-700 bg-slate-800 flex justify-between items-center">
-                        <div class="flex items-center gap-4">
-                            <span class="font-mono text-sky-400">Target Asset:</span>
-                            <select id="asset-selector" class="bg-slate-700 border-none text-white text-sm rounded px-3 py-1 focus:ring-2 focus:ring-sky-500">
-                                <option value="BTC">Bitcoin (BTC)</option>
-                                <option value="TSLA">Tesla (TSLA)</option>
-                                <option value="GOLD">Gold (XAU)</option>
-                            </select>
-                        </div>
-                        <button id="analyze-btn" class="bg-sky-600 hover:bg-sky-500 text-white px-6 py-2 rounded text-sm font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-                            RUN ANALYSIS
+                    <div class="p-4 border-b border-slate-700 bg-slate-800/50 flex justify-between items-center">
+                        <div class="font-mono text-sky-400">TARGET: BTC-USD (Live)</div>
+                        <button id="analyze-btn" class="bg-sky-600 hover:bg-sky-500 text-white px-6 py-2 rounded text-sm font-bold transition-all shadow-lg hover:shadow-sky-500/20">
+                            REFRESH ANALYSIS
                         </button>
                     </div>
 
-                    <!-- Display Area -->
                     <div class="flex-grow p-8 relative">
                         
-                        <!-- State 1: Idle -->
-                        <div id="sim-idle" class="absolute inset-0 flex flex-col items-center justify-center text-center p-8">
-                            <div class="text-6xl mb-4 opacity-20">📊</div>
-                            <h3 class="text-2xl font-bold text-slate-300">Ready to Analyze</h3>
-                            <p class="text-slate-500 max-w-md mt-2">Select an asset and click 'Run Analysis' to trigger the AI pipeline.</p>
+                        <div id="sim-loading" class="hidden absolute inset-0 flex flex-col items-center justify-center bg-slate-900/90 z-10 backdrop-blur-sm">
+                            <div class="w-16 h-16 border-4 border-sky-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                            <div class="font-mono text-sky-400">Connecting to Neural Net...</div>
                         </div>
 
-                        <!-- State 2: Loading / Processing -->
-                        <div id="sim-loading" class="hidden absolute inset-0 flex flex-col items-center justify-center bg-slate-900 z-10">
-                            <div class="w-64 bg-slate-800 rounded-full h-2 mb-4 overflow-hidden">
-                                <div id="progress-bar" class="bg-sky-500 h-full w-0 transition-all duration-300 ease-out"></div>
-                            </div>
-                            <div id="loading-text" class="font-mono text-sky-400">Connecting to Data Layer...</div>
-                            <div class="mt-8 grid grid-cols-4 gap-2 w-full max-w-lg opacity-50 text-xs font-mono text-center">
-                                <div class="step-ind" id="step-1">DATA</div>
-                                <div class="step-ind" id="step-2">FEATURES</div>
-                                <div class="step-ind" id="step-3">MODEL</div>
-                                <div class="step-ind" id="step-4">REASON</div>
-                            </div>
-                        </div>
-
-                        <!-- State 3: Results -->
-                        <div id="sim-results" class="hidden h-full flex flex-col md:flex-row gap-6">
-                            <!-- Left: Chart -->
-                            <div class="w-full md:w-2/3 flex flex-col">
-                                <div class="flex justify-between items-end mb-4">
-                                    <div>
-                                        <h2 id="res-symbol" class="text-3xl font-bold">BTC/USD</h2>
-                                        <p id="res-price" class="text-xl text-slate-400">$98,420.50</p>
-                                    </div>
-                                    <div id="res-bias" class="px-3 py-1 rounded bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/50">
-                                        BULLISH BIAS
-                                    </div>
+                        <div id="sim-results" class="h-full flex flex-col md:flex-row gap-6">
+                            <div class="w-full md:w-1/3 flex flex-col gap-4">
+                                <div class="bg-slate-700/50 p-4 rounded-lg border border-slate-600">
+                                    <span class="text-xs text-slate-400 uppercase">Current Price</span>
+                                    <div id="res-price" class="text-3xl font-mono font-bold text-white mt-1">---</div>
                                 </div>
-                                <div class="flex-grow bg-slate-800/50 rounded-lg border border-slate-700 p-2 relative h-64">
-                                     <div class="chart-container" style="height: 100%; max-height: 100%;">
-                                        <canvas id="simChart"></canvas>
-                                     </div>
+                                <div class="bg-slate-700/50 p-4 rounded-lg border border-slate-600">
+                                    <span class="text-xs text-slate-400 uppercase">AI Signal</span>
+                                    <div id="res-bias" class="text-xl font-bold mt-1 text-slate-300">---</div>
+                                </div>
+                                <div class="bg-slate-700/50 p-4 rounded-lg border border-slate-600">
+                                    <span class="text-xs text-slate-400 uppercase">Model Confidence</span>
+                                    <div class="flex items-end gap-2 mt-1">
+                                        <span id="res-prob" class="text-4xl font-bold text-sky-400">---%</span>
+                                    </div>
+                                    <div class="w-full bg-slate-900 h-1.5 mt-2 rounded-full overflow-hidden">
+                                        <div id="prob-bar" class="bg-sky-500 h-full w-0 transition-all duration-1000"></div>
+                                    </div>
                                 </div>
                             </div>
 
-                            <!-- Right: Explanation Panel -->
-                            <div class="w-full md:w-1/3 bg-slate-800 rounded-lg border border-slate-700 p-5 flex flex-col gap-4">
-                                <div>
-                                    <span class="text-xs font-mono text-slate-400 uppercase">Probability Score</span>
-                                    <div class="flex items-baseline gap-2">
-                                        <span id="res-prob" class="text-4xl font-bold text-sky-400">72%</span>
-                                        <span class="text-sm text-slate-500">Confidence</span>
-                                    </div>
-                                    <div class="w-full bg-slate-700 h-1.5 mt-2 rounded-full overflow-hidden">
-                                        <div id="prob-bar" class="bg-sky-500 h-full w-[72%]"></div>
-                                    </div>
-                                </div>
-                                
-                                <div class="flex-grow overflow-y-auto pr-2 custom-scroll">
-                                    <div class="mb-4">
-                                        <span class="text-xs font-mono text-slate-400 uppercase block mb-1">Reasoning</span>
-                                        <p id="res-reason" class="text-sm text-slate-300 leading-relaxed">
-                                            Momentum indicators (RSI) are recovering from oversold territory. Volume has spiked on recent support tests, indicating institutional accumulation.
-                                        </p>
-                                    </div>
-                                    <div>
-                                        <span class="text-xs font-mono text-slate-400 uppercase block mb-1 text-amber-500">Risk Warning</span>
-                                        <p id="res-risk" class="text-sm text-slate-300 leading-relaxed">
-                                            High volatility expected due to upcoming macro news. Stop-loss recommended below recent swing low.
-                                        </p>
-                                    </div>
-                                </div>
-                                
-                                <button class="w-full bg-slate-700 hover:bg-slate-600 text-white py-2 rounded text-xs font-medium transition-colors">
-                                    View Full Technical Breakdown
-                                </button>
+                            <div class="w-full md:w-2/3 bg-slate-700/30 rounded-lg border border-slate-600 p-6 relative overflow-hidden">
+                                <div class="absolute top-0 left-0 w-1 h-full bg-sky-500"></div>
+                                <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                                    <span>🤖</span> AI Reasoning
+                                </h3>
+                                <p id="res-reason" class="text-slate-300 leading-relaxed font-light text-lg">
+                                    Waiting for analysis command...
+                                </p>
                             </div>
                         </div>
 
                     </div>
                 </div>
             </div>
-        </section>
-
-        <!-- Security & Scalability -->
-        <section id="security" class="py-16 bg-slate-50">
-             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-10">
-                    <!-- Security -->
-                    <div class="bg-white p-8 rounded-xl shadow-sm border border-slate-200">
-                        <div class="w-12 h-12 bg-sky-100 rounded-lg flex items-center justify-center text-sky-600 text-2xl mb-6">🔒</div>
-                        <h3 class="text-2xl font-bold text-slate-900 mb-4">Security Philosophy</h3>
-                        <p class="text-slate-600 mb-6">
-                            ForwardFin is designed to eliminate the risks of automated trading bots. We prioritize user control and data safety.
-                        </p>
-                        <ul class="space-y-4">
-                            <li class="flex items-start">
-                                <span class="text-green-500 font-bold mr-3">✓</span>
-                                <span class="text-slate-700"><strong>No API Keys Required:</strong> We never touch your exchange account.</span>
-                            </li>
-                            <li class="flex items-start">
-                                <span class="text-green-500 font-bold mr-3">✓</span>
-                                <span class="text-slate-700"><strong>Non-Custodial:</strong> We never hold or route your funds.</span>
-                            </li>
-                            <li class="flex items-start">
-                                <span class="text-green-500 font-bold mr-3">✓</span>
-                                <span class="text-slate-700"><strong>Read-Only Data:</strong> We consume public market data, not private user data.</span>
-                            </li>
-                        </ul>
-                    </div>
-
-                    <!-- Scalability Vision -->
-                    <div class="bg-white p-8 rounded-xl shadow-sm border border-slate-200">
-                         <div class="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center text-indigo-600 text-2xl mb-6">🚀</div>
-                        <h3 class="text-2xl font-bold text-slate-900 mb-4">Future Scalability</h3>
-                        <p class="text-slate-600 mb-6">
-                            Built on a microservice architecture to support rapid evolution and integration.
-                        </p>
-                        <div class="grid grid-cols-2 gap-4">
-                            <div class="p-4 bg-slate-50 rounded border border-slate-100">
-                                <h4 class="font-bold text-slate-800 text-sm">Backend</h4>
-                                <p class="text-xs text-slate-500 mt-1">Microservices for modular scaling.</p>
-                            </div>
-                            <div class="p-4 bg-slate-50 rounded border border-slate-100">
-                                <h4 class="font-bold text-slate-800 text-sm">AI Models</h4>
-                                <p class="text-xs text-slate-500 mt-1">Plug-and-play architecture for new models.</p>
-                            </div>
-                            <div class="p-4 bg-slate-50 rounded border border-slate-100">
-                                <h4 class="font-bold text-slate-800 text-sm">Expansion</h4>
-                                <p class="text-xs text-slate-500 mt-1">Broker integration as advisory layer.</p>
-                            </div>
-                            <div class="p-4 bg-slate-50 rounded border border-slate-100">
-                                <h4 class="font-bold text-slate-800 text-sm">Personalization</h4>
-                                <p class="text-xs text-slate-500 mt-1">Emotion-aware decision feedback.</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-             </div>
         </section>
 
     </main>
 
-    <!-- Footer -->
-    <footer class="bg-slate-900 text-slate-400 py-12 border-t border-slate-800">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-            <div class="flex justify-center items-center gap-2 mb-4">
-                <div class="w-6 h-6 bg-slate-700 rounded flex items-center justify-center text-white text-xs font-bold">F</div>
-                <span class="font-bold text-lg text-white">ForwardFin</span>
-            </div>
-            <p class="text-sm mb-6 max-w-lg mx-auto">
-                Democratizing financial intelligence. A decision-support system helping everyday people trade smarter, not harder.
-            </p>
-            <div class="text-xs text-slate-600">
-                &copy; 2025 ForwardFin Architecture Concept. All rights reserved.
-            </div>
-        </div>
-    </footer>
-
-    <!-- Logic Script -->
     <script>
-        // --- DATA & STATE ---
-        
-        // 1. Architecture Data
-        const architectureData = [
-            {
-                title: "Data Ingestion Layer",
-                badge: "Infrastructure",
-                description: "The pipeline's entry point. It connects to exchanges via Websockets for real-time price ticks and REST APIs for historical context.",
-                components: [
-                    "Real-time market data stream (Price, Volume)",
-                    "Fundamental data sources (News, Earnings, Macro)",
-                    "Market Sentiment inputs (Volatility proxies)"
-                ],
-                purpose: "Purpose: Normalize and stream raw data into the analysis pipeline reliably."
-            },
-            {
-                title: "Analysis & Feature Engineering",
-                badge: "Data Science",
-                description: "Transforms raw numbers into meaningful metrics. This layer calculates technical indicators and detects market regimes (e.g., trending vs. ranging).",
-                components: [
-                    "Technical Indicators (RSI, MACD, Moving Averages)",
-                    "Volatility & Risk Metrics",
-                    "Pattern Recognition Algorithms"
-                ],
-                purpose: "Purpose: Convert raw noise into structured features usable by ML models."
-            },
-            {
-                title: "AI / ML Inference Engine",
-                badge: "Machine Learning",
-                description: "The core intelligence. Uses probabilistic models to estimate directional bias and confidence scores. Prioritizes interpretability over complexity.",
-                components: [
-                    "Directional Bias Models (Bullish/Bearish)",
-                    "Confidence Scoring Engine",
-                    "Risk-to-Reward Calculators"
-                ],
-                purpose: "Key Principle: Explainability over black-box prediction. Models are lightweight and replaceable."
-            },
-            {
-                title: "Reasoning & Explanation Layer",
-                badge: "NLP / Logic",
-                description: "The translator. Takes the mathematical output from the ML engine and converts it into human-readable text and visual breakdowns.",
-                components: [
-                    "Natural Language Generation (NLG)",
-                    "Visual Trade Breakdowns",
-                    "Risk Warning Generator"
-                ],
-                purpose: "Purpose: This is where AI meets human understanding. Explains the 'Why'."
-            },
-            {
-                title: "User Interaction Layer",
-                badge: "Frontend UI",
-                description: "The dashboard. Displays the insights to the user, allowing them to make the final decision. It does NOT execute trades.",
-                components: [
-                    "Interactive Charts with Overlays",
-                    "Probability Meters",
-                    "Decision Support Prompts"
-                ],
-                purpose: "Philosophy: User retains full control of capital. No automatic execution."
-            }
-        ];
+        // --- GLOBAL STATE ---
+        let globalConfidence = 0;
+        let heroChart = null;
 
-        // 2. Comparison Data
-        const comparisonData = {
-            problem: [
-                { title: "Confusion", icon: "❓", text: "Overwhelmed by complex charts and technical jargon." },
-                { title: "Fear", icon: "😨", text: "Scared of losing money due to lack of knowledge." },
-                { title: "Guesswork", icon: "🎲", text: "Following hype, influencers, or gut feelings." }
-            ],
-            solution: [
-                { title: "Clarity", icon: "💡", text: "Simple explanations of what the asset is and why it's moving." },
-                { title: "Confidence", icon: "🛡️", text: "Risk and probability defined before you trade." },
-                { title: "Education", icon: "🧠", text: "Guided experience that teaches you while you trade." }
-            ]
-        };
-
-        // 3. Simulation Mock Data
-        const simulationScenarios = {
-            "BTC": {
-                price: "$98,420.50",
-                bias: "BULLISH BIAS",
-                biasColor: "emerald",
-                prob: "72%",
-                reason: "Bitcoin is showing strong momentum divergence on the 4H chart. Institutional volume inflows detected at the $97k support level suggest a breakout is imminent.",
-                risk: "Macro economic data release in 2 hours may cause short-term volatility. Ensure stop-losses are set below $96,500.",
-                trend: [65, 68, 67, 72, 75, 74, 80, 85, 82, 90, 95, 98] // Mock data
-            },
-            "TSLA": {
-                price: "$245.30",
-                bias: "NEUTRAL / WAIT",
-                biasColor: "amber",
-                prob: "45%",
-                reason: "Tesla is currently consolidating within a tight range. Indicators are mixed, showing no clear directional advantage for buyers or sellers right now.",
-                risk: "Choppy market conditions. Entering now exposes capital to theta decay or fake-outs. Recommended to wait for a clear break above $250.",
-                trend: [240, 242, 241, 243, 242, 244, 243, 245, 244, 245, 245, 245]
-            },
-            "GOLD": {
-                price: "$2,350.10",
-                bias: "BEARISH BIAS",
-                biasColor: "rose",
-                prob: "68%",
-                reason: "Gold has broken below key moving averages. The strengthening dollar index (DXY) is putting downward pressure on commodities.",
-                risk: "Geopolitical headlines could reverse this trend rapidly. This is a technical setup that relies on macro stability.",
-                trend: [2400, 2390, 2385, 2380, 2375, 2380, 2370, 2360, 2355, 2350, 2345, 2350]
-            }
-        };
-
-        // --- VISUALIZATION SETUP ---
-
-        let heroChartInstance = null;
-        let simChartInstance = null;
-
-        function initCharts() {
-            // Hero Gauge Chart
-            const ctxHero = document.getElementById('heroChart').getContext('2d');
-            heroChartInstance = new Chart(ctxHero, {
+        // --- 1. INITIALIZE CHART ---
+        function initHeroChart() {
+            const ctx = document.getElementById('heroChart').getContext('2d');
+            heroChart = new Chart(ctx, {
                 type: 'doughnut',
                 data: {
-                    labels: ['Success Probability', 'Risk Factor'],
+                    labels: ['Confidence', 'Uncertainty'],
                     datasets: [{
-                        data: [72, 28],
-                        backgroundColor: ['#0284c7', '#e2e8f0'], // sky-600, slate-200
+                        data: [0, 100],
+                        backgroundColor: ['#0ea5e9', '#e2e8f0'], // sky-500, slate-200
                         borderWidth: 0,
-                        hoverOffset: 4
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     cutout: '75%',
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: { enabled: false }
-                    }
+                    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                    animation: { duration: 1000 }
                 },
                 plugins: [{
                     id: 'textCenter',
@@ -589,8 +171,12 @@
                         var fontSize = (height / 114).toFixed(2);
                         ctx.font = "bold " + fontSize + "em sans-serif";
                         ctx.textBaseline = "middle";
-                        ctx.fillStyle = "#0f172a"; // slate-900
-                        var text = "72%", textX = Math.round((width - ctx.measureText(text).width) / 2), textY = height / 2;
+                        ctx.fillStyle = "#0f172a"; 
+                        
+                        var text = globalConfidence + "%",
+                        textX = Math.round((width - ctx.measureText(text).width) / 2),
+                        textY = height / 2;
+                        
                         ctx.fillText(text, textX, textY);
                         ctx.save();
                     }
@@ -598,235 +184,99 @@
             });
         }
 
-        // --- INTERACTION LOGIC ---
-
-        // 1. Architecture Layer Selection
-        function selectLayer(index) {
-            // Update active styling
-            document.querySelectorAll('.arch-layer').forEach((el, i) => {
-                if (i === index) {
-                    el.classList.add('active', 'bg-sky-50', 'border-l-sky-600');
-                    el.classList.remove('border-l-transparent');
-                } else {
-                    el.classList.remove('active', 'bg-sky-50', 'border-l-sky-600');
-                    el.classList.add('border-l-transparent');
-                }
-            });
-
-            // Update content
-            const data = architectureData[index];
-            const titleEl = document.getElementById('detail-title');
-            const badgeEl = document.getElementById('detail-badge');
-            const descEl = document.getElementById('detail-desc');
-            const listEl = document.getElementById('detail-list');
-            const purposeEl = document.getElementById('detail-purpose');
-
-            // Animate content change
-            const detailContainer = document.querySelector('.lg\\:col-span-7 > div');
-            detailContainer.classList.add('opacity-50');
-            
-            setTimeout(() => {
-                titleEl.textContent = data.title;
-                badgeEl.textContent = data.badge;
-                descEl.textContent = data.description;
-                purposeEl.textContent = data.purpose;
+        // --- 2. FETCH DATA FUNCTION ---
+        async function fetchMarketData() {
+            try {
+                // Call our FastAPI Backend
+                const response = await fetch('/api/live-data');
+                const data = await response.json();
                 
-                // Clear and rebuild list
-                listEl.innerHTML = '';
-                data.components.forEach(comp => {
-                    const li = document.createElement('li');
-                    li.className = "flex items-start text-sm text-slate-700";
-                    li.innerHTML = `<span class="w-1.5 h-1.5 bg-sky-500 rounded-full mt-1.5 mr-2 flex-shrink-0"></span>${comp}`;
-                    listEl.appendChild(li);
-                });
+                if (!data.price) return null; // No data yet
 
-                detailContainer.classList.remove('opacity-50');
-            }, 200);
-        }
-
-        // 2. Problem/Solution Toggle
-        function toggleView(view) {
-            const btnProblem = document.getElementById('btn-problem');
-            const btnSolution = document.getElementById('btn-solution');
-            const slider = document.getElementById('slider-bg');
-            const display = document.getElementById('content-display');
-
-            // Style buttons
-            if (view === 'problem') {
-                btnProblem.classList.remove('text-slate-500');
-                btnProblem.classList.add('text-slate-900');
-                btnSolution.classList.add('text-slate-500');
-                btnSolution.classList.remove('text-slate-900');
-                slider.style.transform = 'translateX(0)';
-            } else {
-                btnSolution.classList.remove('text-slate-500');
-                btnSolution.classList.add('text-slate-900');
-                btnProblem.classList.add('text-slate-500');
-                btnProblem.classList.remove('text-slate-900');
-                slider.style.transform = 'translateX(100%)';
+                return {
+                    price: data.price.price,
+                    priceStr: "$" + data.price.price.toLocaleString('en-US', {minimumFractionDigits: 2}),
+                    symbol: data.price.symbol,
+                    bias: data.prediction ? data.prediction.bias : "ANALYZING",
+                    prob: data.prediction ? Math.round(data.prediction.probability) : 0,
+                    narrative: data.narrative
+                };
+            } catch (e) {
+                console.error("Fetch error:", e);
+                return null;
             }
-
-            // Render Content
-            display.innerHTML = '';
-            comparisonData[view].forEach(item => {
-                const card = document.createElement('div');
-                card.className = `bg-white p-6 rounded-xl border ${view === 'problem' ? 'border-red-100 shadow-sm' : 'border-emerald-100 shadow-md'} fade-in flex flex-col items-center text-center transition-all hover:-translate-y-1`;
-                card.innerHTML = `
-                    <div class="text-4xl mb-4">${item.icon}</div>
-                    <h3 class="font-bold text-slate-900 text-lg mb-2">${item.title}</h3>
-                    <p class="text-slate-600 text-sm">${item.text}</p>
-                `;
-                display.appendChild(card);
-            });
         }
 
-        // 3. Simulation Logic
-        const analyzeBtn = document.getElementById('analyze-btn');
-        const assetSelector = document.getElementById('asset-selector');
-        
-        analyzeBtn.addEventListener('click', () => {
-            const asset = assetSelector.value;
-            const scenario = simulationScenarios[asset];
+        // --- 3. AUTO-UPDATE LOOP (The "Pulse") ---
+        async function updateDashboard() {
+            const data = await fetchMarketData();
+            if (!data) return;
 
-            // UI State: Loading
-            document.getElementById('sim-idle').classList.add('hidden');
-            document.getElementById('sim-results').classList.add('hidden');
-            document.getElementById('sim-loading').classList.remove('hidden');
-            analyzeBtn.disabled = true;
+            // Update Nav Ticker
+            const ticker = document.getElementById('nav-ticker');
+            ticker.innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> ${data.symbol}: ${data.priceStr}`;
 
-            // Animate Progress
-            const progressBar = document.getElementById('progress-bar');
-            const loadingText = document.getElementById('loading-text');
-            const steps = [
-                { width: '25%', text: 'Fetching Market Data...', id: 'step-1' },
-                { width: '50%', text: 'Calculating Indicators...', id: 'step-2' },
-                { width: '75%', text: 'Running ML Inference...', id: 'step-3' },
-                { width: '100%', text: 'Generating Explanation...', id: 'step-4' }
-            ];
+            // Update Hero Section
+            globalConfidence = data.prob;
+            document.getElementById('hero-bias').innerText = data.bias + " (" + data.prob + "%)";
+            document.getElementById('hero-badge').innerText = "System Status: Online | Connected to Redis";
+            document.getElementById('hero-badge').classList.remove('bg-slate-100', 'text-slate-600');
+            document.getElementById('hero-badge').classList.add('bg-emerald-100', 'text-emerald-700');
 
-            let stepIndex = 0;
-            const interval = setInterval(() => {
-                if (stepIndex >= steps.length) {
-                    clearInterval(interval);
-                    showResults(scenario);
-                    return;
+            // Update Chart
+            if (heroChart) {
+                heroChart.data.datasets[0].data = [data.prob, 100 - data.prob];
+                // Color Logic: Green for Bull, Red for Bear
+                if (data.bias === "BULLISH") {
+                    heroChart.data.datasets[0].backgroundColor = ['#10b981', '#e2e8f0']; // emerald
+                } else {
+                    heroChart.data.datasets[0].backgroundColor = ['#f43f5e', '#e2e8f0']; // rose
                 }
-                
-                const step = steps[stepIndex];
-                progressBar.style.width = step.width;
-                loadingText.textContent = step.text;
-                
-                // Highlight step text
-                document.querySelectorAll('.step-ind').forEach(el => el.classList.remove('text-sky-400', 'opacity-100'));
-                const stepEl = document.getElementById(step.id);
-                stepEl.classList.add('text-sky-400', 'opacity-100', 'font-bold');
+                heroChart.update();
+            }
+        }
 
-                stepIndex++;
-            }, 800); // 800ms per step
+        // --- 4. MANUAL ANALYSIS BUTTON ---
+        document.getElementById('analyze-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('analyze-btn');
+            const loader = document.getElementById('sim-loading');
+            
+            // Show loading state
+            btn.disabled = true;
+            loader.classList.remove('hidden');
+
+            // Artificial delay to make it feel like "thinking" (User Psychology)
+            await new Promise(r => setTimeout(r, 800));
+
+            // Fetch real data
+            const data = await fetchMarketData();
+            loader.classList.add('hidden');
+            btn.disabled = false;
+
+            if (data) {
+                document.getElementById('res-price').innerText = data.priceStr;
+                document.getElementById('res-bias').innerText = data.bias;
+                
+                // Color the bias text
+                const biasEl = document.getElementById('res-bias');
+                if (data.bias === "BULLISH") biasEl.className = "text-xl font-bold mt-1 text-emerald-400";
+                else biasEl.className = "text-xl font-bold mt-1 text-rose-400";
+
+                document.getElementById('res-prob').innerText = data.prob + "%";
+                document.getElementById('prob-bar').style.width = data.prob + "%";
+                document.getElementById('res-reason').innerText = data.narrative.replace(/"/g, ''); // Remove quotes
+            }
         });
 
-        function showResults(data) {
-            // UI State: Results
-            document.getElementById('sim-loading').classList.add('hidden');
-            document.getElementById('sim-results').classList.remove('hidden');
-            document.getElementById('sim-results').classList.add('fade-in');
-            analyzeBtn.disabled = false;
-            analyzeBtn.textContent = 'Analyze Again';
-
-            // Populate Text Data
-            document.getElementById('res-symbol').textContent = `${document.getElementById('asset-selector').value}/USD`;
-            document.getElementById('res-price').textContent = data.price;
-            
-            const biasEl = document.getElementById('res-bias');
-            biasEl.textContent = data.bias;
-            // Reset classes
-            biasEl.className = `px-3 py-1 rounded font-bold border border-${data.biasColor}-500/50 bg-${data.biasColor}-500/20 text-${data.biasColor}-400`;
-
-            document.getElementById('res-prob').textContent = data.prob;
-            document.getElementById('prob-bar').style.width = data.prob;
-            document.getElementById('res-reason').textContent = data.reason;
-            document.getElementById('res-risk').textContent = data.risk;
-
-            // Render/Update Chart
-            renderSimChart(data.trend, data.biasColor);
-        }
-
-        function renderSimChart(dataPoints, colorName) {
-            const ctx = document.getElementById('simChart').getContext('2d');
-            
-            // Map color names to hex
-            const colors = {
-                'emerald': '#10b981',
-                'amber': '#f59e0b',
-                'rose': '#f43f5e'
-            };
-            const color = colors[colorName];
-
-            if (simChartInstance) {
-                simChartInstance.destroy();
-            }
-
-            simChartInstance = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: ['1H', '2H', '3H', '4H', '5H', '6H', '7H', '8H', '9H', '10H', '11H', 'Now'],
-                    datasets: [{
-                        label: 'Price Action',
-                        data: dataPoints,
-                        borderColor: color,
-                        backgroundColor: (context) => {
-                            const ctx = context.chart.ctx;
-                            const gradient = ctx.createLinearGradient(0, 0, 0, 200);
-                            gradient.addColorStop(0, color + '40'); // 25% opacity
-                            gradient.addColorStop(1, color + '00'); // 0% opacity
-                            return gradient;
-                        },
-                        borderWidth: 2,
-                        tension: 0.4,
-                        fill: true,
-                        pointRadius: 3,
-                        pointBackgroundColor: '#fff',
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: { 
-                            mode: 'index', 
-                            intersect: false,
-                            backgroundColor: '#1e293b',
-                            titleColor: '#94a3b8',
-                            bodyColor: '#fff'
-                        }
-                    },
-                    scales: {
-                        x: { display: false },
-                        y: { 
-                            display: true,
-                            grid: { color: '#334155' },
-                            ticks: { color: '#94a3b8' }
-                        }
-                    }
-                }
-            });
-        }
-
-        // --- INITIALIZATION ---
+        // --- STARTUP ---
         document.addEventListener('DOMContentLoaded', () => {
-            initCharts();
-            toggleView('problem'); // Set initial state
-            selectLayer(0); // Select first layer by default
+            initHeroChart();
+            
+            // Run update immediately, then every 3 seconds
+            updateDashboard();
+            setInterval(updateDashboard, 3000);
         });
 
     </script>
-    <!-- Visualization & Content Choices:
-         1. Hero Doughnut: Simple, immediate communication of the "Confidence Score" feature.
-         2. Comparison Toggle: Uses JS DOM manipulation to swap text/icons. Better than a static table for engagement.
-         3. Architecture Stack: Vertical list on left, details on right. This is a classic "Master-Detail" UI pattern, perfect for explaining complex systems step-by-step without overwhelming.
-         4. Simulation Chart: A Line chart (Chart.js) that updates based on the selected asset. It makes the "abstract" AI concrete by showing what the user actually gets.
-         CONFIRMATION: NO SVG graphics used (Chart.js uses Canvas). NO Mermaid JS used.
-    -->
 </body>
 </html>
