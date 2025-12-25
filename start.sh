@@ -11,6 +11,7 @@ echo "--- Starting Unified Backend ---"
 python services/unified.py &
 sleep 5
 
-# 3. Start the Frontend (The Face)
-echo "--- Starting Frontend ---"
-streamlit run services/frontend/main.py --server.port $PORT --server.address 0.0.0.0
+# 3. Start the Professional Frontend (FastAPI)
+echo "--- Starting FastAPI Web Server ---"
+# We bind to 0.0.0.0 and use the PORT provided by Render
+uvicorn services.frontend.main:app --host 0.0.0.0 --port $PORT

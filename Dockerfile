@@ -25,7 +25,9 @@ RUN pip install --no-cache-dir \
     xgboost \
     shap \
     scikit-learn \
-    streamlit
+    streamlit \
+    fastapi \
+    uvicorn
 
 # 3. Copy your entire project code into the container
 COPY . .
