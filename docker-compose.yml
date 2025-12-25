@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  # 1. The Data Source
+  ingestion_service:
+    build: ./services/ingestion
+    container_name: ff_ingestion
+    environment:
+      - REDIS_HOST=redis
+    depends_on:
+      - redis
+
+  # 2. The Mathematician
+  analysis_service:
+    build: ./services/analysis
+    container_name: ff_analysis
+    environment:
+      - REDIS_HOST=redis
+    depends_on:
+      - redis
+
+  # 3. The AI Brain
+  inference_service:
+    build: ./services/inference
+    container_name: ff_inference
+    environment:
+      - REDIS_HOST=redis
+    depends_on:
+      - redis
+
+  # 4. The Narrator
+  narrative_service:
+    build: ./services/narrative
+    container_name: ff_narrative
+    environment:
+      - REDIS_HOST=redis
+    depends_on:
+      - redis
+
+  # 5. The Face (NEW!)
+  frontend_service:
+    build: ./services/frontend
+    container_name: ff_frontend
+    environment:
+      - REDIS_HOST=redis
+    ports:
+      - "8501:8501"
+    depends_on:
+      - redis
+
+  # Infrastructure
+  redis:
+    image: "redis:alpine"
+    container_name: forwardfin_redis
+    ports:
+      - "6379:6379"
+
+  questdb:
+    image: "questdb/questdb"
+    container_name: forwardfin_questdb
+    ports:
+      - "9000:9000"
+      - "8812:8812"
