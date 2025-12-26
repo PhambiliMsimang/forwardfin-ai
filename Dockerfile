@@ -9,21 +9,25 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
-COPY requirements.txt .
-
-# Install dependencies (Standard)
-RUN pip install --no-cache-dir -r requirements.txt
-
-# FORCE INSTALL dependencies (Safety Net)
-RUN pip install --no-cache-dir vaderSentiment xgboost scikit-learn yfinance pandas numpy redis fastapi uvicorn requests
-
-# Copy the app code
+# Copy the application code
 COPY . .
 
 # --- THE FIX ---
-# We use the raw "Shell Form" (no brackets).
-# This runs the backend services in the background (&) and the website in the foreground.
-# If the website crashes, the whole container will exit immediately (showing us the error),
-# instead of timing out after 10 minutes.
-CMD python services/analysis/main.py & python services/inference/main.py & uvicorn services.gateway.main:app --host 0.0.0.0 --port 10000
+# We ignore requirements.txt and force-install the list directly here.
+# This guarantees 'vaderSentiment' is installed.
+RUN pip install --no-cache-dir \
+    fastapi \
+    uvicorn \
+    redis \
+    xgboost \
+    pandas \
+    numpy \
+    yfinance \
+    scikit-learn \
+    vaderSentiment \
+    requests
+
+# --- STARTUP COMMAND ---
+# We use 'sh -c' to run multiple commands.
+# We use 'python -m uvicorn' which is crash-proof (finds the module automatically).
+CMD ["sh", "-c", "python services/analysis/main.py & python services/inference/main.py & python -m uvicorn services.gateway.main:app --host 0.0.0.0 --port 10000"]
