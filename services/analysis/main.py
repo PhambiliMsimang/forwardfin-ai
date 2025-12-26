@@ -5,21 +5,33 @@ import os
 import pandas as pd
 import numpy as np
 import yfinance as yf
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+import sys
+
+# --- SAFE IMPORT BLOCK ---
+try:
+    from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+    HAS_NEWS = True
+    analyzer = SentimentIntensityAnalyzer()
+except ImportError:
+    print("⚠️ WARNING: 'vaderSentiment' not found. News features disabled.")
+    HAS_NEWS = False
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 r = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
-analyzer = SentimentIntensityAnalyzer()
 
-print("🧮 ANALYSIS + NEWS: Engine Started...", flush=True)
+print("🧮 ANALYSIS ENGINE: Started (Safe Mode)", flush=True)
 
 price_history = []
 last_news_fetch = 0
 cached_sentiment = 0.0
-cached_headline = "No major news detected."
+cached_headline = "News module loading..."
 
 def fetch_crypto_news():
     global last_news_fetch, cached_sentiment, cached_headline
+    
+    if not HAS_NEWS:
+        return 0.0, "News Disabled (Install vaderSentiment)"
+
     if time.time() - last_news_fetch < 900: 
         return cached_sentiment, cached_headline
 
@@ -100,6 +112,10 @@ def process_stream():
                     "headline": headline
                 }
             }
+            # Print log to prove it's running
+            if len(price_history) % 10 == 0:
+                print(f"🧮 CALC: RSI={rsi:.1f} Risk={risk}")
+                
             r.set("latest_price", json.dumps(packet))
             r.publish('analysis_results', json.dumps(packet))
         except Exception as e:
