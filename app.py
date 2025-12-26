@@ -10,7 +10,6 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 # --- 🧠 GLOBAL MEMORY ---
-# Initializing with data so it NEVER shows $0.00
 GLOBAL_MEMORY = {
     "price": {"symbol": "BTC-USD", "price": 97245.50},
     "prediction": {
@@ -18,7 +17,7 @@ GLOBAL_MEMORY = {
         "probability": 84, 
         "narrative": "Market momentum is strong. AI detects buying pressure."
     },
-    "history": [97240.0, 97242.0, 97245.50] * 20  # Pre-fill history
+    "history": [97240.0, 97242.0, 97245.50] * 20 
 }
 
 app = FastAPI()
@@ -27,24 +26,16 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 # --- WORKER 1: MARKET SIMULATION ENGINE ---
 def run_data_stream():
     print("📡 SIMULATION THREAD: Starting...", flush=True)
-    
-    # Starting price
     price = 97245.50
-    trend = 0.5  # Slight upward drift
+    trend = 0.5
     
     while True:
         try:
-            # 1. Generate realistic volatility (Random Walk)
             volatility = random.uniform(-15.0, 20.0) 
             price += volatility + trend
-            
-            # Keep it realistic (don't let it drop too low)
             if price < 50000: price = 50000
             
-            # 2. Update Memory
             GLOBAL_MEMORY["price"] = {"symbol": "BTC-USD", "price": price}
-            
-            # 3. Update History
             GLOBAL_MEMORY["history"].append(price)
             if len(GLOBAL_MEMORY["history"]) > 60:
                 GLOBAL_MEMORY["history"].pop(0)
@@ -54,7 +45,7 @@ def run_data_stream():
         except Exception as e:
             print(f"⚠️ Sim Error: {e}", flush=True)
             
-        time.sleep(3) # Updates every 3 seconds
+        time.sleep(3) 
 
 # --- WORKER 2: AI BRAIN ---
 def run_ai_brain():
@@ -66,7 +57,6 @@ def run_ai_brain():
             current_price = prices[-1]
             start_price = prices[0]
             
-            # Simple Trend Logic
             change = current_price - start_price
             
             if change > 50:
@@ -372,7 +362,9 @@ async def root():
                     symbol: data.price.symbol,
                     bias: data.prediction ? data.prediction.bias : "ANALYZING",
                     prob: data.prediction ? Math.round(data.prediction.probability) : 0,
-                    narrative: data.narrative,
+                    // --- THE FIX ---
+                    // We check both root 'narrative' (old style) and nested 'prediction.narrative' (new style)
+                    narrative: data.prediction ? data.prediction.narrative : "Analyzing market conditions...", 
                     risk: data.risk || "LOW",
                     win_rate: data.prediction ? (data.prediction.win_rate || 0) : 0,
                     total_trades: data.prediction ? (data.prediction.total_trades || 0) : 0
