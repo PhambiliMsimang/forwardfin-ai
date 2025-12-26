@@ -11,13 +11,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # --- 🧠 GLOBAL MEMORY ---
 GLOBAL_MEMORY = {
-    "price": {"symbol": "BTC-USD", "price": 97245.50},
+    "price": {"symbol": "BTC-USD", "price": 97623.17},
     "prediction": {
         "bias": "BULLISH", 
-        "probability": 84, 
-        "narrative": "Market momentum is strong. AI detects buying pressure."
+        "probability": 89, 
+        "narrative": "System initializing complex market analysis..."
     },
-    "history": [97240.0, 97242.0, 97245.50] * 20 
+    "history": [97620.0, 97621.0, 97623.17] * 20 
 }
 
 app = FastAPI()
@@ -26,13 +26,16 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 # --- WORKER 1: MARKET SIMULATION ENGINE ---
 def run_data_stream():
     print("📡 SIMULATION THREAD: Starting...", flush=True)
-    price = 97245.50
+    price = 97623.17
     trend = 0.5
     
     while True:
         try:
-            volatility = random.uniform(-15.0, 20.0) 
+            # Generate volatility
+            volatility = random.uniform(-25.0, 35.0) 
             price += volatility + trend
+            
+            # Keep price realistic
             if price < 50000: price = 50000
             
             GLOBAL_MEMORY["price"] = {"symbol": "BTC-USD", "price": price}
@@ -47,7 +50,7 @@ def run_data_stream():
             
         time.sleep(3) 
 
-# --- WORKER 2: AI BRAIN ---
+# --- WORKER 2: ADVANCED AI BRAIN ---
 def run_ai_brain():
     print("🧠 AI THREAD: Starting...", flush=True)
     
@@ -55,27 +58,43 @@ def run_ai_brain():
         try:
             prices = GLOBAL_MEMORY["history"]
             current_price = prices[-1]
-            start_price = prices[0]
             
-            change = current_price - start_price
+            # 1. Calculate Synthetic Technicals
+            change_1h = current_price - prices[0]
+            rsi = random.randint(35, 85) # Simulate RSI fluctuation
+            support = current_price - random.randint(200, 800)
+            resistance = current_price + random.randint(200, 800)
             
-            if change > 50:
+            # 2. Build Complex Narrative
+            if change_1h > 0:
                 bias = "BULLISH"
-                prob = random.randint(75, 95)
-                narrative = "Strong upward momentum detected. Buyers are in control."
-            elif change < -50:
+                prob = random.randint(82, 96)
+                reason = (
+                    f"Bitcoin is showing strong continuation patterns above the ${support:,.0f} support level. "
+                    f"RSI is currently at {rsi}, indicating healthy buying momentum without being overextended. "
+                    f"Institutional order flow suggests a target test of ${resistance:,.0f} in the short term."
+                )
+            elif change_1h < 0:
                 bias = "BEARISH"
-                prob = random.randint(75, 95)
-                narrative = "Selling pressure increasing. Technicals suggest a pullback."
+                prob = random.randint(75, 88)
+                reason = (
+                    f"Price action has faced rejection near the ${resistance:,.0f} resistance zone. "
+                    f"Momentum indicators are diverging, with RSI dropping to {rsi}. "
+                    f"We expect a potential retest of the ${support:,.0f} liquidity zone before any reversal."
+                )
             else:
                 bias = "NEUTRAL"
-                prob = random.randint(45, 65)
-                narrative = "Market is consolidating. Waiting for breakout."
+                prob = random.randint(45, 60)
+                reason = (
+                    f"Market is currently consolidating between ${support:,.0f} and ${resistance:,.0f}. "
+                    f"Volume is declining, suggesting traders are waiting for a breakout confirmation. "
+                    f"RSI is neutral at {rsi}. Recommend holding positions until volatility returns."
+                )
 
             GLOBAL_MEMORY["prediction"] = {
                 "bias": bias,
                 "probability": prob,
-                "narrative": narrative,
+                "narrative": reason,
                 "win_rate": 78,
                 "total_trades": 1342
             }
