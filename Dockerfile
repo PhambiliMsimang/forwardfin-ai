@@ -12,17 +12,18 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements
 COPY requirements.txt .
 
-# Install dependencies (including supervisor)
+# Install dependencies (Standard)
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Force install the AI tools (just to be safe)
-RUN pip install --no-cache-dir vaderSentiment xgboost scikit-learn yfinance pandas numpy redis fastapi uvicorn requests supervisor
+# FORCE INSTALL dependencies (Safety Net)
+RUN pip install --no-cache-dir vaderSentiment xgboost scikit-learn yfinance pandas numpy redis fastapi uvicorn requests
 
 # Copy the app code
 COPY . .
 
-# Copy the supervisor configuration
-COPY supervisord.conf /etc/supervisord.conf
-
-# Start Supervisor (which starts your 3 apps)
-CMD ["supervisord", "-c", "/etc/supervisord.conf"]
+# --- THE FIX ---
+# We use the raw "Shell Form" (no brackets).
+# This runs the backend services in the background (&) and the website in the foreground.
+# If the website crashes, the whole container will exit immediately (showing us the error),
+# instead of timing out after 10 minutes.
+CMD python services/analysis/main.py & python services/inference/main.py & uvicorn services.gateway.main:app --host 0.0.0.0 --port 10000
