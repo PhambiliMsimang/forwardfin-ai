@@ -1,7 +1,7 @@
 # Use Python 3.9
 FROM python:3.9-slim
 
-# Set working directory
+# Set working directory to /app
 WORKDIR /app
 
 # Install system dependencies
@@ -9,22 +9,13 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the application code first
+# Copy everything (including your new __init__.py files)
 COPY . .
 
-# --- FIX 1: THE MAP ---
-# This tells Python: "Look for code inside the /app folder"
+# Force Python to look in the current directory
 ENV PYTHONPATH=/app
 
-# --- FIX 2: THE GLUE ---
-# We create empty files called __init__.py. 
-# This tells Python: "These folders contain importable code."
-RUN touch services/__init__.py && \
-    touch services/gateway/__init__.py && \
-    touch services/analysis/__init__.py && \
-    touch services/inference/__init__.py
-
-# Install dependencies (Force install everything)
+# Install dependencies
 RUN pip install --no-cache-dir \
     fastapi \
     uvicorn \
@@ -35,9 +26,8 @@ RUN pip install --no-cache-dir \
     yfinance \
     scikit-learn \
     vaderSentiment \
-    requests \
-    supervisor
+    requests
 
-# --- STARTUP ---
-# We use the same command, but now Python knows where 'services.gateway' is.
-CMD ["sh", "-c", "python services/analysis/main.py & python services/inference/main.py & python -m uvicorn services.gateway.main:app --host 0.0.0.0 --port 10000"]
+# Start the apps
+# We use the raw command string which is most reliable
+CMD sh -c "python services/analysis/main.py & python services/inference/main.py & uvicorn services.gateway.main:app --host 0.0.0.0 --port 10000"
