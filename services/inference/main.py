@@ -17,7 +17,7 @@ warnings.filterwarnings("ignore")
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 r = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
 
-# 🚨 YOUR DISCORD WEBHOOK 🚨
+# 🚨 DISCORD WEBHOOK (Your Alerts)
 DISCORD_WEBHOOK_URL = "https://discordapp.com/api/webhooks/1454098742218330307/gi8wvEn0pMcNsAWIR_kY5-_0_VE4CvsgWjkSXjCasXX-xUrydbhYtxHRLLLgiKxs_pLL"
 
 CONFIDENCE_THRESHOLD = 70.0
@@ -61,6 +61,7 @@ if model is None:
     model.fit(X_train, y_train)
 
 # --- 2. THE JUDGE (Scoreboard Tracker) ---
+# 🚨 THIS IS THE MISSING PART THAT FIXES YOUR WIN RATE 🚨
 def update_scoreboard(current_price):
     last_trade = r.get("memory_last_trade")
     stats = r.get("scoreboard_stats")
