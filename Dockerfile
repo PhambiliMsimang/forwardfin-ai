@@ -1,42 +1,28 @@
-# Use a slightly larger version of Python that mimics a full computer
-FROM python:3.10-slim
+# Use an official Python runtime as a parent image
+FROM python:3.9-slim
 
-# Prevent Python from writing temporary files
-ENV PYTHONUNBUFFERED=1
-
-# Create the app folder
+# Set the working directory in the container
 WORKDIR /app
 
-# 1. Install System Tools (Redis, gcc for AI, git)
+# Install system dependencies (needed for some Python tools)
 RUN apt-get update && apt-get install -y \
-    redis-server \
-    gcc \
-    g++ \
-    git \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Install Python Libraries (All of them!)
-RUN pip install --no-cache-dir \
-    redis \
-    asyncio \
-    yfinance \
-    pandas \
-    numpy \
-    xgboost \
-    shap \
-    scikit-learn \
-    streamlit \
-    fastapi \
-    uvicorn
+# Copy the requirements file into the container
+COPY requirements.txt .
 
-# 3. Copy your entire project code into the container
+# 1. Install standard requirements
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 2. FORCE INSTALL the missing AI tools (This fixes your issue)
+RUN pip install --no-cache-dir vaderSentiment xgboost scikit-learn yfinance pandas numpy redis fastapi uvicorn requests
+
+# Copy the rest of the application code
 COPY . .
 
-# 4. Give the "Bus Driver" permission to drive
+# Make the start script executable
 RUN chmod +x start.sh
 
-# 5. The Cloud will tell us which port to use (default to 8501)
-ENV PORT=8501
-
-# 6. Start the Bus!
+# Run the start script
 CMD ["./start.sh"]
