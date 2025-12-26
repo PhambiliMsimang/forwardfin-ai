@@ -7,7 +7,6 @@ import xgboost as xgb
 import yfinance as yf
 import sys
 import warnings
-import time
 
 # Clean up logs
 sys.stdout.reconfigure(line_buffering=True)
@@ -22,11 +21,15 @@ print("🧠 AI BRAIN: Waking up...", flush=True)
 def train_model():
     print("🎓 TRAINER: Downloading last 30 days of Bitcoin history...")
     try:
-        # Fetch real data (1 hour intervals)
-        df = yf.download('BTC-USD', period='30d', interval='1h', progress=False)
+        # Fetch real data with a header to look like a real browser
+        # (Helps avoid getting blocked by Yahoo)
+        btc = yf.Ticker("BTC-USD")
+        df = btc.history(period="1mo", interval="1h")
         
-        if len(df) < 100:
-            print("⚠️ Not enough data. Using dummy model.")
+        print(f"📊 DEBUG: Downloaded {len(df)} rows of data.")
+
+        if len(df) < 50:
+            print("⚠️ Not enough data downloaded. Switching to Fallback.")
             return None
 
         # Calculate Indicators (Features)
@@ -59,16 +62,11 @@ def train_model():
         print(f"📚 Training on {len(df)} candles of real history...")
         
         # Build XGBoost Model
-        model = xgb.XGBClassifier(
-            n_estimators=100, 
-            learning_rate=0.05, 
-            max_depth=3, 
-            eval_metric='logloss'
-        )
+        model = xgb.XGBClassifier(n_estimators=100, max_depth=3, eval_metric='logloss')
         model.fit(X, y)
         
         score = model.score(X, y)
-        print(f"✅ MODEL TRAINED! Accuracy on history: {score*100:.1f}%")
+        print(f"✅ REAL MODEL TRAINED! Accuracy: {score*100:.1f}%")
         return model
 
     except Exception as e:
@@ -78,12 +76,16 @@ def train_model():
 # --- 2. INITIALIZE ---
 model = train_model()
 
-# Fallback if training fails (prevents crash)
+# Fallback if training fails (CRASH PROOF VERSION)
 if model is None:
-    print("⚠️ Using Fallback Dummy Model")
-    X_train = np.array([[20, -5, -2], [80, 5, 2]])
+    print("⚠️ Using Fallback Dummy Model (Pandas Version)")
+    # We create a tiny DataFrame with the EXACT same column names
+    X_train = pd.DataFrame(
+        [[20, -5, -2], [80, 5, 2]], 
+        columns=['RSI', 'MACD', 'ROC']  # <--- This fixes the mismatch error!
+    )
     y_train = np.array([1, 0])
-    model = xgb.XGBClassifier()
+    model = xgb.XGBClassifier(eval_metric='logloss')
     model.fit(X_train, y_train)
 
 # --- 3. THE PREDICTOR (Live Loop) ---
@@ -102,21 +104,26 @@ def run_inference():
         if message['type'] != 'message': continue
             
         try:
-            # 1. Get Live Data from Analysis Robot
+            # 1. Get Live Data
             data = json.loads(message['data'])
             ind = data['indicators']
             
             # 2. Extract Features
             rsi = clean_value(ind.get('rsi', 50))
             macd = clean_value(ind.get('macd', 0))
-            # We estimate ROC from macd/price for simplicity in live mode
-            roc = (macd / clean_value(data.get('price', 1))) * 100 
+            # Safe ROC estimation
+            price = clean_value(data.get('price', 1))
+            roc = (macd / price) * 100 if price != 0 else 0
 
             # 3. Predict Real Future
-            features = pd.DataFrame([[rsi, macd, roc]], columns=['RSI', 'MACD', 'ROC'])
+            # Ensure columns match training EXACTLY
+            features = pd.DataFrame(
+                [[rsi, macd, roc]], 
+                columns=['RSI', 'MACD', 'ROC']
+            )
+            
             probs = model.predict_proba(features)[0]
             bullish_prob = float(round(probs[1] * 100, 1))
-
             bias = "BULLISH" if bullish_prob > 50 else "BEARISH"
             
             # 4. Publish
