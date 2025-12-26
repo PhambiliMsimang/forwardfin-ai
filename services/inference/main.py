@@ -7,6 +7,8 @@ import xgboost as xgb
 import yfinance as yf
 import sys
 import warnings
+import time
+import urllib.request  # <--- Library for sending Discord messages
 
 # Clean up logs
 sys.stdout.reconfigure(line_buffering=True)
@@ -14,6 +16,15 @@ warnings.filterwarnings("ignore")
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 r = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
+
+# --- CONFIGURATION ---
+# 🚨 PASTE YOUR WEBHOOK URL HERE 🚨
+DISCORD_WEBHOOK_URL = "https://discordapp.com/api/webhooks/1454098742218330307/gi8wvEn0pMcNsAWIR_kY5-_0_VE4CvsgWjkSXjCasXX-xUrydbhYtxHRLLLgiKxs_pLL"
+
+# Alert Settings
+CONFIDENCE_THRESHOLD = 70.0  # Only alert if AI is >70% sure
+ALERT_COOLDOWN = 3600        # Wait 1 hour between alerts (to avoid spam)
+last_alert_time = 0
 
 print("🧠 AI BRAIN: Waking up...", flush=True)
 
@@ -68,28 +79,63 @@ if model is None:
     model = xgb.XGBClassifier(eval_metric='logloss')
     model.fit(X_train, y_train)
 
-# --- 3. THE JUDGE (Performance Tracker) ---
+# --- 3. THE WATCHDOG (Discord Alerts) ---
+def send_discord_alert(symbol, bias, prob, price, risk):
+    global last_alert_time
+    
+    # Check Cooldown
+    if time.time() - last_alert_time < ALERT_COOLDOWN:
+        return
+
+    print(f"🚨 SENDING DISCORD ALERT: {bias} on {symbol}")
+    
+    # Create the Message
+    color = 5763719 # Green
+    if bias == "BEARISH": color = 15548997 # Red
+
+    payload = {
+        "username": "ForwardFin AI",
+        "embeds": [{
+            "title": f"🚨 TRADE ALERT: {symbol}",
+            "description": f"The AI has detected a high-probability setup.",
+            "color": color,
+            "fields": [
+                {"name": "Signal", "value": f"**{bias}**", "inline": True},
+                {"name": "Confidence", "value": f"{prob}%", "inline": True},
+                {"name": "Price", "value": f"${price:,.2f}", "inline": True},
+                {"name": "Market Risk", "value": f"{risk}", "inline": True}
+            ],
+            "footer": {"text": "ForwardFin Real-Time Terminal"}
+        }]
+    }
+
+    try:
+        req = urllib.request.Request(
+            DISCORD_WEBHOOK_URL, 
+            data=json.dumps(payload).encode('utf-8'), 
+            headers={'Content-Type': 'application/json'}
+        )
+        urllib.request.urlopen(req)
+        last_alert_time = time.time() # Reset timer
+        print("✅ Alert Sent Successfully.")
+    except Exception as e:
+        print(f"❌ Failed to send alert: {e}")
+
+# --- 4. THE JUDGE (Scoreboard) ---
 def update_scoreboard(current_price):
-    # Load past memory
     last_trade = r.get("memory_last_trade")
     stats = r.get("scoreboard_stats")
     
-    # Initialize if empty
-    if not stats:
-        stats = {"wins": 0, "total": 0, "win_rate": 0}
-    else:
-        stats = json.loads(stats)
+    if not stats: stats = {"wins": 0, "total": 0, "win_rate": 0}
+    else: stats = json.loads(stats)
 
     if last_trade:
         memory = json.loads(last_trade)
         entry_price = memory['price']
         bias = memory['bias']
         
-        # Did we win?
-        # Only grade if price moved enough (avoid noise)
-        price_diff = current_price - entry_price
-        
-        if abs(price_diff) > 5: # Threshold of $5 movement
+        # Only judge significant moves ($50 diff to avoid noise)
+        if abs(current_price - entry_price) > 50:
             outcome = "HOLD"
             if bias == "BULLISH" and current_price > entry_price: outcome = "WIN"
             elif bias == "BEARISH" and current_price < entry_price: outcome = "WIN"
@@ -99,19 +145,12 @@ def update_scoreboard(current_price):
             if outcome != "HOLD":
                 stats['total'] += 1
                 if outcome == "WIN": stats['wins'] += 1
-                
-                # Calculate Rate
-                if stats['total'] > 0:
-                    stats['win_rate'] = int((stats['wins'] / stats['total']) * 100)
-                
-                print(f"⚖️ JUDGE: {outcome} (Entry: {entry_price} -> Now: {current_price}) | Acc: {stats['win_rate']}%")
-                
-                # Save Stats
+                if stats['total'] > 0: stats['win_rate'] = int((stats['wins'] / stats['total']) * 100)
                 r.set("scoreboard_stats", json.dumps(stats))
 
     return stats
 
-# --- 4. THE PREDICTOR (Live Loop) ---
+# --- 5. THE PREDICTOR (Live Loop) ---
 def clean_value(val):
     try:
         if isinstance(val, list): return float(val[0])
@@ -130,11 +169,12 @@ def run_inference():
             data = json.loads(message['data'])
             ind = data['indicators']
             current_price = clean_value(data.get('price', 0))
+            risk_level = ind.get('risk_level', "HIGH") # <--- Get Risk
             
-            # 1. JUDGE THE PAST
+            # 1. Judge Past Performance
             stats = update_scoreboard(current_price)
             
-            # 2. PREDICT THE FUTURE
+            # 2. Predict Future
             rsi = clean_value(ind.get('rsi', 50))
             macd = clean_value(ind.get('macd', 0))
             roc = (macd / current_price) * 100 if current_price != 0 else 0
@@ -144,18 +184,23 @@ def run_inference():
             bullish_prob = float(round(probs[1] * 100, 1))
             bias = "BULLISH" if bullish_prob > 50 else "BEARISH"
             
-            # 3. SAVE MEMORY (For next time)
+            # 3. CHECK FOR ALERTS (The New Watchdog Logic) 🐕
+            # If AI is Confident (>70%) AND Risk is NOT HIGH
+            if (bullish_prob > CONFIDENCE_THRESHOLD or bullish_prob < (100-CONFIDENCE_THRESHOLD)) and risk_level != "HIGH":
+                send_discord_alert(data['symbol'], bias, bullish_prob, current_price, risk_level)
+
+            # 4. Save Memory
             memory_packet = {"price": current_price, "bias": bias}
             r.set("memory_last_trade", json.dumps(memory_packet))
             
-            # 4. PUBLISH
+            # 5. Publish
             print(f"🔮 PREDICTION: {bias} ({bullish_prob}%)")
             result = {
                 "symbol": data['symbol'],
                 "bias": bias,
                 "probability": bullish_prob,
-                "win_rate": stats['win_rate'], # <--- New Data!
-                "total_trades": stats['total']
+                "win_rate": stats.get('win_rate', 0),
+                "total_trades": stats.get('total', 0)
             }
             r.set("latest_prediction", json.dumps(result))
             r.publish("inference_results", json.dumps(result))
