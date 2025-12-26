@@ -21,47 +21,32 @@ print("🧠 AI BRAIN: Waking up...", flush=True)
 def train_model():
     print("🎓 TRAINER: Downloading last 30 days of Bitcoin history...")
     try:
-        # Fetch real data with a header to look like a real browser
-        # (Helps avoid getting blocked by Yahoo)
         btc = yf.Ticker("BTC-USD")
         df = btc.history(period="1mo", interval="1h")
         
-        print(f"📊 DEBUG: Downloaded {len(df)} rows of data.")
-
         if len(df) < 50:
-            print("⚠️ Not enough data downloaded. Switching to Fallback.")
             return None
 
-        # Calculate Indicators (Features)
-        # RSI
+        # Features
         delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         rs = gain / loss
         df['RSI'] = 100 - (100 / (1 + rs))
 
-        # MACD
         exp1 = df['Close'].ewm(span=12, adjust=False).mean()
         exp2 = df['Close'].ewm(span=26, adjust=False).mean()
         df['MACD'] = exp1 - exp2
-
-        # ROC (Rate of Change)
         df['ROC'] = df['Close'].pct_change(periods=14) * 100
 
-        # TARGET (Did price go UP in the next hour?)
+        # Target
         df['Target'] = (df['Close'].shift(-1) > df['Close']).astype(int)
-
-        # Clean NaN values
         df.dropna(inplace=True)
 
-        # Prepare Training Data
         features = ['RSI', 'MACD', 'ROC']
         X = df[features]
         y = df['Target']
-
-        print(f"📚 Training on {len(df)} candles of real history...")
         
-        # Build XGBoost Model
         model = xgb.XGBClassifier(n_estimators=100, max_depth=3, eval_metric='logloss')
         model.fit(X, y)
         
@@ -76,19 +61,57 @@ def train_model():
 # --- 2. INITIALIZE ---
 model = train_model()
 
-# Fallback if training fails (CRASH PROOF VERSION)
 if model is None:
-    print("⚠️ Using Fallback Dummy Model (Pandas Version)")
-    # We create a tiny DataFrame with the EXACT same column names
-    X_train = pd.DataFrame(
-        [[20, -5, -2], [80, 5, 2]], 
-        columns=['RSI', 'MACD', 'ROC']  # <--- This fixes the mismatch error!
-    )
+    print("⚠️ Using Fallback Dummy Model")
+    X_train = pd.DataFrame([[20, -5, -2], [80, 5, 2]], columns=['RSI', 'MACD', 'ROC'])
     y_train = np.array([1, 0])
     model = xgb.XGBClassifier(eval_metric='logloss')
     model.fit(X_train, y_train)
 
-# --- 3. THE PREDICTOR (Live Loop) ---
+# --- 3. THE JUDGE (Performance Tracker) ---
+def update_scoreboard(current_price):
+    # Load past memory
+    last_trade = r.get("memory_last_trade")
+    stats = r.get("scoreboard_stats")
+    
+    # Initialize if empty
+    if not stats:
+        stats = {"wins": 0, "total": 0, "win_rate": 0}
+    else:
+        stats = json.loads(stats)
+
+    if last_trade:
+        memory = json.loads(last_trade)
+        entry_price = memory['price']
+        bias = memory['bias']
+        
+        # Did we win?
+        # Only grade if price moved enough (avoid noise)
+        price_diff = current_price - entry_price
+        
+        if abs(price_diff) > 5: # Threshold of $5 movement
+            outcome = "HOLD"
+            if bias == "BULLISH" and current_price > entry_price: outcome = "WIN"
+            elif bias == "BEARISH" and current_price < entry_price: outcome = "WIN"
+            elif bias == "BULLISH" and current_price < entry_price: outcome = "LOSS"
+            elif bias == "BEARISH" and current_price > entry_price: outcome = "LOSS"
+            
+            if outcome != "HOLD":
+                stats['total'] += 1
+                if outcome == "WIN": stats['wins'] += 1
+                
+                # Calculate Rate
+                if stats['total'] > 0:
+                    stats['win_rate'] = int((stats['wins'] / stats['total']) * 100)
+                
+                print(f"⚖️ JUDGE: {outcome} (Entry: {entry_price} -> Now: {current_price}) | Acc: {stats['win_rate']}%")
+                
+                # Save Stats
+                r.set("scoreboard_stats", json.dumps(stats))
+
+    return stats
+
+# --- 4. THE PREDICTOR (Live Loop) ---
 def clean_value(val):
     try:
         if isinstance(val, list): return float(val[0])
@@ -104,34 +127,35 @@ def run_inference():
         if message['type'] != 'message': continue
             
         try:
-            # 1. Get Live Data
             data = json.loads(message['data'])
             ind = data['indicators']
+            current_price = clean_value(data.get('price', 0))
             
-            # 2. Extract Features
+            # 1. JUDGE THE PAST
+            stats = update_scoreboard(current_price)
+            
+            # 2. PREDICT THE FUTURE
             rsi = clean_value(ind.get('rsi', 50))
             macd = clean_value(ind.get('macd', 0))
-            # Safe ROC estimation
-            price = clean_value(data.get('price', 1))
-            roc = (macd / price) * 100 if price != 0 else 0
+            roc = (macd / current_price) * 100 if current_price != 0 else 0
 
-            # 3. Predict Real Future
-            # Ensure columns match training EXACTLY
-            features = pd.DataFrame(
-                [[rsi, macd, roc]], 
-                columns=['RSI', 'MACD', 'ROC']
-            )
-            
+            features = pd.DataFrame([[rsi, macd, roc]], columns=['RSI', 'MACD', 'ROC'])
             probs = model.predict_proba(features)[0]
             bullish_prob = float(round(probs[1] * 100, 1))
             bias = "BULLISH" if bullish_prob > 50 else "BEARISH"
             
-            # 4. Publish
+            # 3. SAVE MEMORY (For next time)
+            memory_packet = {"price": current_price, "bias": bias}
+            r.set("memory_last_trade", json.dumps(memory_packet))
+            
+            # 4. PUBLISH
             print(f"🔮 PREDICTION: {bias} ({bullish_prob}%)")
             result = {
                 "symbol": data['symbol'],
                 "bias": bias,
-                "probability": bullish_prob 
+                "probability": bullish_prob,
+                "win_rate": stats['win_rate'], # <--- New Data!
+                "total_trades": stats['total']
             }
             r.set("latest_prediction", json.dumps(result))
             r.publish("inference_results", json.dumps(result))
