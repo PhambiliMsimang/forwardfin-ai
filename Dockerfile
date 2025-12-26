@@ -1,28 +1,25 @@
-# Use an official Python runtime as a parent image
+# Use Python 3.9
 FROM python:3.9-slim
 
-# Set the working directory in the container
+# Set working directory
 WORKDIR /app
 
-# Install system dependencies (needed for some Python tools)
+# Install system tools needed for AI libraries
 RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the requirements file into the container
+# Copy the requirements file
 COPY requirements.txt .
 
-# 1. Install standard requirements
+# Install all Python libraries
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 2. FORCE INSTALL the missing AI tools (This fixes your issue)
-RUN pip install --no-cache-dir vaderSentiment xgboost scikit-learn yfinance pandas numpy redis fastapi uvicorn requests
-
-# Copy the rest of the application code
+# Copy the rest of the code
 COPY . .
 
-# Make the start script executable
-RUN chmod +x start.sh
-
-# Run the start script
-CMD ["./start.sh"]
+# START THE APP (This replaces start.sh)
+# We use a single command to run all 3 services at once
+CMD python services/analysis/main.py & \
+    python services/inference/main.py & \
+    uvicorn services.gateway.main:app --host 0.0.0.0 --port 10000
