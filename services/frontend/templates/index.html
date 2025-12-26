@@ -271,7 +271,10 @@
             // Update Hero Section (Confidence)
             globalConfidence = data.prob;
             document.getElementById('hero-bias').innerText = data.bias + " (" + data.prob + "%)";
-            
+            document.getElementById('hero-badge').innerText = "SYSTEM STATUS: ONLINE | CONNECTED TO REDIS";
+            document.getElementById('hero-badge').classList.remove('bg-slate-100', 'text-slate-600');
+            document.getElementById('hero-badge').classList.add('bg-emerald-100', 'text-emerald-700');
+
             // --- NEW: Update Risk Meter ---
             const riskText = document.getElementById('risk-text');
             const riskCircle = document.getElementById('risk-circle');
