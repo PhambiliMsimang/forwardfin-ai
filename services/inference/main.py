@@ -8,7 +8,7 @@ import yfinance as yf
 import sys
 import warnings
 import time
-import urllib.request  # <--- Library for sending Discord messages
+import urllib.request
 
 # Clean up logs
 sys.stdout.reconfigure(line_buffering=True)
@@ -17,28 +17,23 @@ warnings.filterwarnings("ignore")
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 r = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
 
-# --- CONFIGURATION ---
-# 🚨 PASTE YOUR WEBHOOK URL HERE 🚨
+# 🚨 YOUR DISCORD WEBHOOK 🚨
 DISCORD_WEBHOOK_URL = "https://discordapp.com/api/webhooks/1454098742218330307/gi8wvEn0pMcNsAWIR_kY5-_0_VE4CvsgWjkSXjCasXX-xUrydbhYtxHRLLLgiKxs_pLL"
 
-# Alert Settings
-CONFIDENCE_THRESHOLD = 70.0  # Only alert if AI is >70% sure
-ALERT_COOLDOWN = 3600        # Wait 1 hour between alerts (to avoid spam)
+CONFIDENCE_THRESHOLD = 70.0
+ALERT_COOLDOWN = 3600
 last_alert_time = 0
 
 print("🧠 AI BRAIN: Waking up...", flush=True)
 
-# --- 1. THE TEACHER (Training Function) ---
+# --- 1. TRAINING (Technical Only) ---
 def train_model():
     print("🎓 TRAINER: Downloading last 30 days of Bitcoin history...")
     try:
         btc = yf.Ticker("BTC-USD")
         df = btc.history(period="1mo", interval="1h")
-        
-        if len(df) < 50:
-            return None
+        if len(df) < 50: return None
 
-        # Features
         delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -49,79 +44,23 @@ def train_model():
         exp2 = df['Close'].ewm(span=26, adjust=False).mean()
         df['MACD'] = exp1 - exp2
         df['ROC'] = df['Close'].pct_change(periods=14) * 100
-
-        # Target
         df['Target'] = (df['Close'].shift(-1) > df['Close']).astype(int)
         df.dropna(inplace=True)
 
         features = ['RSI', 'MACD', 'ROC']
-        X = df[features]
-        y = df['Target']
-        
         model = xgb.XGBClassifier(n_estimators=100, max_depth=3, eval_metric='logloss')
-        model.fit(X, y)
-        
-        score = model.score(X, y)
-        print(f"✅ REAL MODEL TRAINED! Accuracy: {score*100:.1f}%")
+        model.fit(df[features], df['Target'])
         return model
+    except: return None
 
-    except Exception as e:
-        print(f"❌ TRAINING FAILED: {e}")
-        return None
-
-# --- 2. INITIALIZE ---
 model = train_model()
-
 if model is None:
-    print("⚠️ Using Fallback Dummy Model")
     X_train = pd.DataFrame([[20, -5, -2], [80, 5, 2]], columns=['RSI', 'MACD', 'ROC'])
     y_train = np.array([1, 0])
     model = xgb.XGBClassifier(eval_metric='logloss')
     model.fit(X_train, y_train)
 
-# --- 3. THE WATCHDOG (Discord Alerts) ---
-def send_discord_alert(symbol, bias, prob, price, risk):
-    global last_alert_time
-    
-    # Check Cooldown
-    if time.time() - last_alert_time < ALERT_COOLDOWN:
-        return
-
-    print(f"🚨 SENDING DISCORD ALERT: {bias} on {symbol}")
-    
-    # Create the Message
-    color = 5763719 # Green
-    if bias == "BEARISH": color = 15548997 # Red
-
-    payload = {
-        "username": "ForwardFin AI",
-        "embeds": [{
-            "title": f"🚨 TRADE ALERT: {symbol}",
-            "description": f"The AI has detected a high-probability setup.",
-            "color": color,
-            "fields": [
-                {"name": "Signal", "value": f"**{bias}**", "inline": True},
-                {"name": "Confidence", "value": f"{prob}%", "inline": True},
-                {"name": "Price", "value": f"${price:,.2f}", "inline": True},
-                {"name": "Market Risk", "value": f"{risk}", "inline": True}
-            ],
-            "footer": {"text": "ForwardFin Real-Time Terminal"}
-        }]
-    }
-
-    try:
-        req = urllib.request.Request(
-            DISCORD_WEBHOOK_URL, 
-            data=json.dumps(payload).encode('utf-8'), 
-            headers={'Content-Type': 'application/json'}
-        )
-        urllib.request.urlopen(req)
-        last_alert_time = time.time() # Reset timer
-        print("✅ Alert Sent Successfully.")
-    except Exception as e:
-        print(f"❌ Failed to send alert: {e}")
-
-# --- 4. THE JUDGE (Scoreboard) ---
+# --- 2. THE JUDGE (Scoreboard Tracker) ---
 def update_scoreboard(current_price):
     last_trade = r.get("memory_last_trade")
     stats = r.get("scoreboard_stats")
@@ -150,13 +89,54 @@ def update_scoreboard(current_price):
 
     return stats
 
-# --- 5. THE PREDICTOR (Live Loop) ---
-def clean_value(val):
-    try:
-        if isinstance(val, list): return float(val[0])
-        return float(val)
-    except: return 0.0
+# --- 3. GENERATE REASONING ---
+def generate_narrative(bias, prob, rsi, sentiment, headline):
+    """Creates a human-readable explanation combining Tech + News."""
+    reason = f"Technical indicators suggest a {bias} trend ({prob}% confidence)."
+    
+    # Add Technical Context
+    if rsi > 70: reason += " However, the asset is currently Overbought (RSI > 70)."
+    elif rsi < 30: reason += " The asset is currently Oversold (RSI < 30), suggesting a potential bounce."
+    
+    # Add Fundamental Context (The News)
+    if headline != "No major news detected.":
+        if sentiment > 0.05:
+            reason += f" Fundamentally, sentiment is POSITIVE due to news: '{headline}'."
+        elif sentiment < -0.05:
+            reason += f" Fundamentally, sentiment is NEGATIVE due to news: '{headline}'."
+        else:
+            reason += f" News sentiment is neutral ('{headline}')."
+            
+    return reason
 
+# --- 4. WATCHDOG (Discord) ---
+def send_discord_alert(symbol, bias, prob, price, risk, headline):
+    global last_alert_time
+    if time.time() - last_alert_time < ALERT_COOLDOWN: return
+
+    color = 5763719 if bias == "BULLISH" else 15548997
+    payload = {
+        "username": "ForwardFin AI",
+        "embeds": [{
+            "title": f"🚨 TRADE ALERT: {symbol}",
+            "description": f"AI Confidence > {CONFIDENCE_THRESHOLD}%",
+            "color": color,
+            "fields": [
+                {"name": "Signal", "value": f"**{bias}**", "inline": True},
+                {"name": "Confidence", "value": f"{prob}%", "inline": True},
+                {"name": "Price", "value": f"${price:,.2f}", "inline": True},
+                {"name": "News Context", "value": headline, "inline": False}
+            ],
+            "footer": {"text": "ForwardFin Real-Time Terminal"}
+        }]
+    }
+    try:
+        req = urllib.request.Request(DISCORD_WEBHOOK_URL, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
+        urllib.request.urlopen(req)
+        last_alert_time = time.time()
+    except Exception as e: print(f"Discord Error: {e}")
+
+# --- 5. LIVE PREDICTION LOOP ---
 def run_inference():
     pubsub = r.pubsub()
     pubsub.subscribe('analysis_results')
@@ -168,42 +148,54 @@ def run_inference():
         try:
             data = json.loads(message['data'])
             ind = data['indicators']
-            current_price = clean_value(data.get('price', 0))
-            risk_level = ind.get('risk_level', "HIGH") # <--- Get Risk
+            price = float(data.get('price', 0))
             
-            # 1. Judge Past Performance
-            stats = update_scoreboard(current_price)
-            
-            # 2. Predict Future
-            rsi = clean_value(ind.get('rsi', 50))
-            macd = clean_value(ind.get('macd', 0))
-            roc = (macd / current_price) * 100 if current_price != 0 else 0
+            # Extract Data
+            rsi = float(ind.get('rsi', 50))
+            macd = float(ind.get('macd', 0))
+            roc = (macd / price) * 100 if price != 0 else 0
+            sentiment = float(ind.get('sentiment', 0.0))
+            headline = ind.get('headline', "")
+            risk = ind.get('risk_level', 'LOW')
 
+            # A. Update Scoreboard (The Judge)
+            stats = update_scoreboard(price)
+
+            # B. Base Technical Prediction
             features = pd.DataFrame([[rsi, macd, roc]], columns=['RSI', 'MACD', 'ROC'])
             probs = model.predict_proba(features)[0]
-            bullish_prob = float(round(probs[1] * 100, 1))
-            bias = "BULLISH" if bullish_prob > 50 else "BEARISH"
-            
-            # 3. CHECK FOR ALERTS (The New Watchdog Logic) 🐕
-            # If AI is Confident (>70%) AND Risk is NOT HIGH
-            if (bullish_prob > CONFIDENCE_THRESHOLD or bullish_prob < (100-CONFIDENCE_THRESHOLD)) and risk_level != "HIGH":
-                send_discord_alert(data['symbol'], bias, bullish_prob, current_price, risk_level)
+            bullish_prob = float(probs[1] * 100)
 
-            # 4. Save Memory
-            memory_packet = {"price": current_price, "bias": bias}
-            r.set("memory_last_trade", json.dumps(memory_packet))
-            
-            # 5. Publish
-            print(f"🔮 PREDICTION: {bias} ({bullish_prob}%)")
+            # C. Apply "Fundamental Bias" (News Adjustment)
+            adjustment = sentiment * 10 
+            final_prob = bullish_prob + adjustment
+            final_prob = max(0.0, min(100.0, final_prob))
+            final_prob = round(final_prob, 1)
+            final_bias = "BULLISH" if final_prob > 50 else "BEARISH"
+
+            # D. Generate Narrative
+            narrative = generate_narrative(final_bias, final_prob, rsi, sentiment, headline)
+
+            # E. Publish
+            print(f"🔮 PRED: {final_bias} ({final_prob}%) | News: {sentiment:.2f}")
             result = {
                 "symbol": data['symbol'],
-                "bias": bias,
-                "probability": bullish_prob,
-                "win_rate": stats.get('win_rate', 0),
+                "bias": final_bias,
+                "probability": final_prob,
+                "win_rate": stats.get('win_rate', 0), 
                 "total_trades": stats.get('total', 0)
             }
             r.set("latest_prediction", json.dumps(result))
+            r.set("latest_narrative", narrative)
             r.publish("inference_results", json.dumps(result))
+
+            # F. Save Memory (For future judging)
+            memory_packet = {"price": price, "bias": final_bias}
+            r.set("memory_last_trade", json.dumps(memory_packet))
+
+            # G. Discord Alert
+            if (final_prob > CONFIDENCE_THRESHOLD or final_prob < (100-CONFIDENCE_THRESHOLD)) and risk != "HIGH":
+                send_discord_alert(data['symbol'], final_bias, final_prob, price, risk, headline)
 
         except Exception as e:
             print(f"⚠️ Inference Error: {e}")
