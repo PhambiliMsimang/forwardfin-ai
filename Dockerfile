@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements
 COPY requirements.txt .
 
-# Install dependencies (Standard)
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # FORCE INSTALL dependencies (Safety Net)
@@ -21,5 +21,5 @@ RUN pip install --no-cache-dir vaderSentiment xgboost scikit-learn yfinance pand
 # Copy the app code
 COPY . .
 
-# Start the app using our new Python script (Crash Proof)
+# Run the manager script
 CMD ["python", "run.py"]
