@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements
 COPY requirements.txt .
 
-# Install dependencies
+# Install dependencies (Standard)
 RUN pip install --no-cache-dir -r requirements.txt
 
 # FORCE INSTALL dependencies (Safety Net)
@@ -21,5 +21,8 @@ RUN pip install --no-cache-dir vaderSentiment xgboost scikit-learn yfinance pand
 # Copy the app code
 COPY . .
 
-# Run the manager script
-CMD ["python", "run.py"]
+# --- THE FIX ---
+# We use a raw BASH command string. 
+# This runs the Analysis & Inference engines in the background (&), 
+# and then runs the Website in the foreground.
+CMD /bin/bash -c "python services/analysis/main.py & python services/inference/main.py & python -m uvicorn services.gateway.main:app --host 0.0.0.0 --port 10000"
