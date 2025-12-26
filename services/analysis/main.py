@@ -8,9 +8,24 @@ import numpy as np
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 r = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
 
-print("🧮 Analysis Engine: Ready to crunch numbers...")
+print("🧮 Analysis Engine: Ready to crunch numbers...", flush=True)
 
 price_history = []
+
+def calculate_volatility(prices, window=20):
+    if len(prices) < window: return 0.0
+    
+    # Create Series
+    series = pd.Series(prices)
+    
+    # Calculate percentage returns
+    returns = series.pct_change()
+    
+    # Calculate Standard Deviation (Volatility) over the window
+    vol = returns.rolling(window=window).std().iloc[-1]
+    
+    # Scale up for readability (e.g., 0.001 -> 0.1)
+    return vol * 100 if not pd.isna(vol) else 0.0
 
 def calculate_rsi(prices, period=14):
     if len(prices) < period: return 50
@@ -42,25 +57,39 @@ def process_stream():
             price = float(data['price'])
             
             price_history.append(price)
-            if len(price_history) > 50: price_history.pop(0)
+            # Keep slightly more history for volatility calc
+            if len(price_history) > 60: price_history.pop(0)
 
+            # --- CALCULATE INDICATORS ---
             rsi = calculate_rsi(price_history)
             macd = calculate_macd(price_history)
+            volatility = calculate_volatility(price_history)
             
+            # --- DETERMINE SIGNAL & RISK ---
             signal = "NEUTRAL"
             if rsi > 70: signal = "SELL"
             elif rsi < 30: signal = "BUY"
 
-            print(f"📊 {data['symbol']} | RSI: {rsi:.2f} | MACD: {macd:.2f} | Sig: {signal}")
+            risk_level = "LOW"
+            if volatility > 0.05: risk_level = "MEDIUM"
+            if volatility > 0.15: risk_level = "HIGH"
 
+            print(f"📊 {data['symbol']} | Vol: {volatility:.4f}% ({risk_level}) | RSI: {rsi:.1f}")
+
+            # --- PACK & SHIP ---
             packet = {
                 "symbol": data['symbol'],
                 "price": price,
-                "indicators": {"rsi": rsi, "macd": macd, "signal": signal}
+                "indicators": {
+                    "rsi": rsi, 
+                    "macd": macd, 
+                    "signal": signal,
+                    "volatility": volatility,
+                    "risk_level": risk_level
+                }
             }
             
-            # --- THE FIX: SAVE TO REDIS CACHE ---
-            r.set("latest_price", json.dumps(packet))  # <--- Website reads this!
+            r.set("latest_price", json.dumps(packet))
             r.publish('analysis_results', json.dumps(packet))
 
         except Exception as e:

@@ -64,16 +64,32 @@
                     </p>
                 </div>
 
-                <div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
-                    <div class="text-center mb-4">
-                        <h3 class="text-sm font-semibold text-slate-500 uppercase">Current AI Confidence</h3>
-                        <p id="hero-bias" class="text-xl font-bold text-slate-800">WAITING FOR DATA...</p>
+               <div class="grid grid-cols-2 gap-4">
+                    
+                    <div class="bg-white p-4 rounded-2xl shadow-lg border border-slate-100 flex flex-col items-center">
+                        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">AI Confidence</h3>
+                        <div style="height: 120px; width: 120px; position: relative;">
+                            <canvas id="heroChart"></canvas>
+                        </div>
+                        <p id="hero-bias" class="text-lg font-bold text-slate-800 mt-2">---</p>
                     </div>
-                    <div class="chart-container" style="height: 250px;">
-                        <canvas id="heroChart"></canvas>
+
+                    <div class="bg-white p-4 rounded-2xl shadow-lg border border-slate-100 flex flex-col items-center">
+                        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Market Risk</h3>
+                        
+                        <div class="h-[120px] w-[120px] flex items-center justify-center relative">
+                            <div class="absolute inset-0 rounded-full border-8 border-slate-100"></div>
+                            <div id="risk-circle" class="absolute inset-0 rounded-full border-8 border-transparent border-t-emerald-500 transition-all duration-700 rotate-45"></div>
+                            
+                            <div class="text-center z-10">
+                                <span id="risk-text" class="text-2xl font-black text-emerald-500">LOW</span>
+                            </div>
+                        </div>
+                        
+                        <p class="text-xs text-slate-400 mt-2 text-center">Volatility Index</p>
                     </div>
+
                 </div>
-            </div>
         </section>
 
         <section class="py-10 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
@@ -234,7 +250,8 @@
                     symbol: data.price.symbol,
                     bias: data.prediction ? data.prediction.bias : "ANALYZING",
                     prob: data.prediction ? Math.round(data.prediction.probability) : 0,
-                    narrative: data.narrative
+                    narrative: data.narrative,
+                    risk: data.risk || "LOW" // <--- Grab Risk Level
                 };
             } catch (e) {
                 console.error("Fetch error:", e);
@@ -251,17 +268,40 @@
             const ticker = document.getElementById('nav-ticker');
             ticker.innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> ${data.symbol}: ${data.priceStr}`;
 
-            // Update Hero Section
+            // Update Hero Section (Confidence)
             globalConfidence = data.prob;
             document.getElementById('hero-bias').innerText = data.bias + " (" + data.prob + "%)";
-            document.getElementById('hero-badge').innerText = "System Status: Online | Connected to Redis";
-            document.getElementById('hero-badge').classList.remove('bg-slate-100', 'text-slate-600');
-            document.getElementById('hero-badge').classList.add('bg-emerald-100', 'text-emerald-700');
+            
+            // --- NEW: Update Risk Meter ---
+            const riskText = document.getElementById('risk-text');
+            const riskCircle = document.getElementById('risk-circle');
+            
+            if (riskText && riskCircle) {
+                riskText.innerText = data.risk;
+                
+                // Reset classes
+                riskCircle.classList.remove('border-t-emerald-500', 'border-t-amber-500', 'border-t-rose-500', 'animate-spin');
+                riskText.classList.remove('text-emerald-500', 'text-amber-500', 'text-rose-500');
+                riskCircle.style.transform = "rotate(45deg)"; // Default pos
+
+                // Apply new color/animation based on risk
+                if (data.risk === "HIGH") {
+                    riskCircle.classList.add('border-t-rose-500', 'animate-spin'); // Spin if dangerous!
+                    riskText.classList.add('text-rose-500');
+                } else if (data.risk === "MEDIUM") {
+                    riskCircle.classList.add('border-t-amber-500');
+                    riskCircle.style.transform = "rotate(180deg)";
+                    riskText.classList.add('text-amber-500');
+                } else {
+                    riskCircle.classList.add('border-t-emerald-500');
+                    riskCircle.style.transform = "rotate(45deg)";
+                    riskText.classList.add('text-emerald-500');
+                }
+            }
 
             // Update Chart
             if (heroChart) {
                 heroChart.data.datasets[0].data = [data.prob, 100 - data.prob];
-                // Color Logic: Green for Bull, Red for Bear
                 if (data.bias === "BULLISH") {
                     heroChart.data.datasets[0].backgroundColor = ['#10b981', '#e2e8f0']; // emerald
                 } else {
@@ -276,38 +316,32 @@
             const btn = document.getElementById('analyze-btn');
             const loader = document.getElementById('sim-loading');
             
-            // Show loading state
             btn.disabled = true;
             loader.classList.remove('hidden');
 
-            // Artificial delay to make it feel like "thinking" (User Psychology)
             await new Promise(r => setTimeout(r, 800));
 
-            // Fetch real data
             const data = await fetchMarketData();
             loader.classList.add('hidden');
             btn.disabled = false;
 
             if (data) {
                 document.getElementById('res-price').innerText = data.priceStr;
-                document.getElementById('res-bias').innerText = data.bias;
-                
-                // Color the bias text
                 const biasEl = document.getElementById('res-bias');
+                biasEl.innerText = data.bias;
+                
                 if (data.bias === "BULLISH") biasEl.className = "text-xl font-bold mt-1 text-emerald-400";
                 else biasEl.className = "text-xl font-bold mt-1 text-rose-400";
 
                 document.getElementById('res-prob').innerText = data.prob + "%";
                 document.getElementById('prob-bar').style.width = data.prob + "%";
-                document.getElementById('res-reason').innerText = data.narrative.replace(/"/g, ''); // Remove quotes
+                document.getElementById('res-reason').innerText = data.narrative.replace(/"/g, '');
             }
         });
 
         // --- STARTUP ---
         document.addEventListener('DOMContentLoaded', () => {
             initHeroChart();
-            
-            // Run update immediately, then every 3 seconds
             updateDashboard();
             setInterval(updateDashboard, 3000);
         });

@@ -1,7 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
 import redis
 import json
 import os
@@ -15,7 +14,11 @@ templates = Jinja2Templates(directory="services/frontend/templates")
 
 # 2. Connect to Redis (The Data Source)
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-r = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
+try:
+    r = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
+except Exception as e:
+    print(f"Warning: Redis connection failed: {e}")
+    r = None
 
 # 3. The Home Page Route
 @app.get("/")
@@ -26,6 +29,9 @@ async def read_root(request: Request):
 # 4. The Data API (Your HTML will ask this for updates)
 @app.get("/api/live-data")
 async def get_data():
+    if not r:
+        return {"error": "Redis not connected"}
+        
     try:
         # Fetch latest data from Redis
         price_data = r.get("latest_price")
@@ -37,13 +43,17 @@ async def get_data():
         pred = json.loads(prediction_data) if prediction_data else None
         narrative = narrative_data if narrative_data else "Waiting for insights..."
 
+        # Extract Risk Level safely
+        # We look inside the price packet for the calculated volatility risk
+        risk = "LOW"
+        if price and 'indicators' in price:
+             risk = price['indicators'].get('risk_level', 'LOW')
+
         return {
             "price": price,
             "prediction": pred,
-            "narrative": narrative
+            "narrative": narrative,
+            "risk": risk  # <--- This is the new fuel for your Risk Gauge
         }
     except Exception as e:
         return {"error": str(e)}
-
-# Note: We don't run app.run() here. 
-# The Cloud will run it using 'uvicorn' command.
