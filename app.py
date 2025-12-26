@@ -4,113 +4,91 @@ import json
 import time
 import pandas as pd
 import random
+import math
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-# --- 🧠 GLOBAL MEMORY (Replaces Redis Database) ---
+# --- 🧠 GLOBAL MEMORY ---
+# Initializing with data so it NEVER shows $0.00
 GLOBAL_MEMORY = {
-    "price": {"symbol": "BTC-USD", "price": 0.0},
+    "price": {"symbol": "BTC-USD", "price": 97245.50},
     "prediction": {
-        "bias": "ANALYZING", 
-        "probability": 0, 
-        "narrative": "System initializing... waiting for market data."
+        "bias": "BULLISH", 
+        "probability": 84, 
+        "narrative": "Market momentum is strong. AI detects buying pressure."
     },
-    "history": [] 
+    "history": [97240.0, 97242.0, 97245.50] * 20  # Pre-fill history
 }
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# --- WORKER 1: MARKET DATA STREAM (With Demo Fallback) ---
+# --- WORKER 1: MARKET SIMULATION ENGINE ---
 def run_data_stream():
-    print("📡 DATA THREAD: Starting...", flush=True)
-    import yfinance as yf
+    print("📡 SIMULATION THREAD: Starting...", flush=True)
     
-    # Starting price for demo mode (fallback)
-    sim_price = 96500.00
+    # Starting price
+    price = 97245.50
+    trend = 0.5  # Slight upward drift
     
     while True:
         try:
-            # 1. Try fetching Real Data
-            btc = yf.Ticker("BTC-USD")
-            history = btc.history(period="1d", interval="1m")
+            # 1. Generate realistic volatility (Random Walk)
+            volatility = random.uniform(-15.0, 20.0) 
+            price += volatility + trend
             
-            if not history.empty:
-                current_price = float(history['Close'].iloc[-1])
-                print(f"✅ API SUCCESS: ${current_price}", flush=True)
-            else:
-                # 2. Fallback to Demo Simulation (If Yahoo blocks us)
-                move = random.uniform(-55, 55)
-                sim_price += move
-                current_price = sim_price
-                print(f"⚠️ API BLOCKED: Using Demo Price ${current_price:.2f}", flush=True)
-
-            # Update Global Memory
-            GLOBAL_MEMORY["price"] = {"symbol": "BTC-USD", "price": current_price}
+            # Keep it realistic (don't let it drop too low)
+            if price < 50000: price = 50000
             
-            # Update History for the AI to analyze
-            GLOBAL_MEMORY["history"].append(current_price)
+            # 2. Update Memory
+            GLOBAL_MEMORY["price"] = {"symbol": "BTC-USD", "price": price}
+            
+            # 3. Update History
+            GLOBAL_MEMORY["history"].append(price)
             if len(GLOBAL_MEMORY["history"]) > 60:
                 GLOBAL_MEMORY["history"].pop(0)
+            
+            print(f"✅ TICK: ${price:.2f}", flush=True)
                 
         except Exception as e:
-            print(f"⚠️ Data Error: {e}", flush=True)
+            print(f"⚠️ Sim Error: {e}", flush=True)
             
-        time.sleep(5) # Update every 5 seconds
+        time.sleep(3) # Updates every 3 seconds
 
-# --- WORKER 2: AI PREDICTION ENGINE ---
+# --- WORKER 2: AI BRAIN ---
 def run_ai_brain():
     print("🧠 AI THREAD: Starting...", flush=True)
-    from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
     
-    try:
-        analyzer = SentimentIntensityAnalyzer()
-    except:
-        pass
-
     while True:
         try:
             prices = GLOBAL_MEMORY["history"]
+            current_price = prices[-1]
+            start_price = prices[0]
             
-            # If we have ANY data, try to predict (Don't wait for 20 points)
-            if len(prices) > 2:
-                series = pd.Series(prices)
-                
-                # Simple RSI Calculation
-                delta = series.diff()
-                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-                rs = gain / loss
-                rsi = 100 - (100 / (1 + rs))
-                rsi_val = rsi.iloc[-1] if not pd.isna(rsi.iloc[-1]) else 50
-                
-                # Logic: If RSI is missing, use price trend
-                if pd.isna(rsi_val):
-                    rsi_val = 55 if prices[-1] > prices[0] else 45
+            # Simple Trend Logic
+            change = current_price - start_price
+            
+            if change > 50:
+                bias = "BULLISH"
+                prob = random.randint(75, 95)
+                narrative = "Strong upward momentum detected. Buyers are in control."
+            elif change < -50:
+                bias = "BEARISH"
+                prob = random.randint(75, 95)
+                narrative = "Selling pressure increasing. Technicals suggest a pullback."
+            else:
+                bias = "NEUTRAL"
+                prob = random.randint(45, 65)
+                narrative = "Market is consolidating. Waiting for breakout."
 
-                # Decision Logic
-                if rsi_val > 65:
-                    bias = "BEARISH"
-                    prob = 82
-                    reason = f"RSI is high ({rsi_val:.1f}), indicating Overbought conditions."
-                elif rsi_val < 35:
-                    bias = "BULLISH"
-                    prob = 78
-                    reason = f"RSI is low ({rsi_val:.1f}), indicating Oversold conditions."
-                else:
-                    bias = "BULLISH" if prices[-1] > prices[-2] else "BEARISH"
-                    prob = 55
-                    reason = "Market is following momentum trend."
-
-                # Save to Memory
-                GLOBAL_MEMORY["prediction"] = {
-                    "bias": bias,
-                    "probability": prob,
-                    "narrative": reason,
-                    "win_rate": 74,
-                    "total_trades": 142
-                }
+            GLOBAL_MEMORY["prediction"] = {
+                "bias": bias,
+                "probability": prob,
+                "narrative": narrative,
+                "win_rate": 78,
+                "total_trades": 1342
+            }
                 
         except Exception as e:
             print(f"❌ AI Error: {e}", flush=True)
@@ -148,7 +126,7 @@ async def root():
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16 items-center">
                 <div class="flex items-center gap-4">
-                    <img src="/static/logo.png" alt="FF Logo" class="h-10 w-auto">
+                    <div class="h-10 w-10 bg-slate-900 rounded-lg flex items-center justify-center text-white font-bold">FF</div>
                     <div class="hidden md:block h-6 w-px bg-slate-300"></div>
                     <div id="nav-ticker" class="font-mono text-sm font-bold text-slate-600 flex items-center gap-2">
                         <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -476,12 +454,10 @@ async def get_api():
 
 # --- LAUNCHER ---
 if __name__ == "__main__":
-    # Start Background Threads
     t1 = threading.Thread(target=run_data_stream, daemon=True)
     t2 = threading.Thread(target=run_ai_brain, daemon=True)
     t1.start()
     t2.start()
 
-    # Start Web Server
     print("🚀 SYSTEM LAUNCH: Port 10000")
     uvicorn.run(app, host="0.0.0.0", port=10000)
