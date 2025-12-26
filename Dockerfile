@@ -12,17 +12,17 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements
 COPY requirements.txt .
 
-# Install dependencies (Standard)
+# Install dependencies (including supervisor)
 RUN pip install --no-cache-dir -r requirements.txt
 
-# FORCE INSTALL dependencies (Safety Net)
-RUN pip install --no-cache-dir vaderSentiment xgboost scikit-learn yfinance pandas numpy redis fastapi uvicorn requests
+# Force install the AI tools (just to be safe)
+RUN pip install --no-cache-dir vaderSentiment xgboost scikit-learn yfinance pandas numpy redis fastapi uvicorn requests supervisor
 
 # Copy the app code
 COPY . .
 
-# --- THE FIX ---
-# We use a raw BASH command string. 
-# This runs the Analysis & Inference engines in the background (&), 
-# and then runs the Website in the foreground.
-CMD /bin/bash -c "python services/analysis/main.py & python services/inference/main.py & python -m uvicorn services.gateway.main:app --host 0.0.0.0 --port 10000"
+# Copy the supervisor configuration
+COPY supervisord.conf /etc/supervisord.conf
+
+# Start Supervisor (which starts your 3 apps)
+CMD ["supervisord", "-c", "/etc/supervisord.conf"]
