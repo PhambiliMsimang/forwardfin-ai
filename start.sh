@@ -1,10 +1,6 @@
 #!/bin/bash
 
-echo "🚀 STARTUP: Force-installing AI tools..."
-pip install --upgrade pip
-pip install vaderSentiment xgboost scikit-learn yfinance pandas numpy redis fastapi uvicorn requests
-
-echo "✅ INSTALL COMPLETE. Starting Services..."
+echo "🚀 STARTING SERVICES..."
 
 # Start the Backend Services in the background
 python services/analysis/main.py &

@@ -6,20 +6,27 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import sys
+import subprocess
 
-# --- SAFE IMPORT BLOCK ---
+# --- 🔧 SELF-HEALING BLOCK ---
+# This forces the server to install the tool if it's missing
 try:
     from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-    HAS_NEWS = True
-    analyzer = SentimentIntensityAnalyzer()
+    print("✅ VADER FOUND: Sentiment Analysis Ready.")
 except ImportError:
-    print("⚠️ WARNING: 'vaderSentiment' not found. News features disabled.")
-    HAS_NEWS = False
+    print("⚠️ VADER MISSING: Auto-installing now...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "vaderSentiment"])
+    print("✅ INSTALL COMPLETE. Importing...")
+    from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
+# Initialize the Analyzer
+analyzer = SentimentIntensityAnalyzer()
+# -----------------------------
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 r = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
 
-print("🧮 ANALYSIS ENGINE: Started (Safe Mode)", flush=True)
+print("🧮 ANALYSIS ENGINE: Started", flush=True)
 
 price_history = []
 last_news_fetch = 0
@@ -29,9 +36,6 @@ cached_headline = "News module loading..."
 def fetch_crypto_news():
     global last_news_fetch, cached_sentiment, cached_headline
     
-    if not HAS_NEWS:
-        return 0.0, "News Disabled (Install vaderSentiment)"
-
     if time.time() - last_news_fetch < 900: 
         return cached_sentiment, cached_headline
 
@@ -39,7 +43,9 @@ def fetch_crypto_news():
         print("📰 FETCHING: Checking for breaking news...")
         btc = yf.Ticker("BTC-USD")
         news_list = btc.news
-        if not news_list: return 0.0, "Market is quiet."
+        
+        if not news_list:
+            return 0.0, "Market is quiet."
 
         scores = []
         top_stories = news_list[:3]
@@ -54,8 +60,10 @@ def fetch_crypto_news():
         cached_sentiment = avg_score
         cached_headline = top_headline
         last_news_fetch = time.time()
+        
         print(f"📰 NEWS PROCESSED: {top_headline} (Score: {avg_score:.2f})")
         return avg_score, top_headline
+
     except Exception as e:
         print(f"⚠️ News Error: {e}")
         return 0.0, "News feed unavailable."
@@ -112,10 +120,6 @@ def process_stream():
                     "headline": headline
                 }
             }
-            # Print log to prove it's running
-            if len(price_history) % 10 == 0:
-                print(f"🧮 CALC: RSI={rsi:.1f} Risk={risk}")
-                
             r.set("latest_price", json.dumps(packet))
             r.publish('analysis_results', json.dumps(packet))
         except Exception as e:
