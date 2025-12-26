@@ -2,11 +2,12 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
-# Install minimal tools
-RUN pip install --no-cache-dir fastapi uvicorn pandas yfinance vaderSentiment
+# Install dependencies directly
+# We include requests explicitly to prevent yfinance errors
+RUN pip install --no-cache-dir fastapi uvicorn pandas yfinance vaderSentiment requests
 
-# Copy the app
+# Copy the ONE file
 COPY app.py .
 
-# Run the app
+# Run the ONE command
 CMD ["python", "app.py"]
