@@ -1,7 +1,7 @@
 # Use Python 3.9
 FROM python:3.9-slim
 
-# Set working directory to /app
+# Set working directory
 WORKDIR /app
 
 # Install system dependencies
@@ -9,13 +9,13 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy everything (including your new __init__.py files)
+# Copy everything
 COPY . .
 
-# Force Python to look in the current directory
+# Force Python to look in /app for modules
 ENV PYTHONPATH=/app
 
-# Install dependencies
+# Install all dependencies manually (No requirements.txt needed)
 RUN pip install --no-cache-dir \
     fastapi \
     uvicorn \
@@ -28,6 +28,5 @@ RUN pip install --no-cache-dir \
     vaderSentiment \
     requests
 
-# Start the apps
-# We use the raw command string which is most reliable
-CMD sh -c "python services/analysis/main.py & python services/inference/main.py & uvicorn services.gateway.main:app --host 0.0.0.0 --port 10000"
+# Run the Unified Manager
+CMD ["python", "unified.py"]
