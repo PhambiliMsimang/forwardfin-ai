@@ -59,7 +59,6 @@ def update_scoreboard(current_price):
     if not stats: stats = {"wins": 0, "total": 0, "win_rate": 0}
     else: stats = json.loads(stats)
     
-    # Simple mock logic for testing if memory fails
     last_trade = r.get("memory_last_trade")
     if last_trade:
         memory = json.loads(last_trade)
@@ -105,7 +104,7 @@ def run_inference():
                 probs = model.predict_proba(features)[0]
                 bullish_prob = float(probs[1] * 100)
             else:
-                # Fallback Logic if XGBoost missing
+                # Fallback Logic
                 bullish_prob = 50.0
                 if rsi < 30: bullish_prob = 70.0
                 if rsi > 70: bullish_prob = 30.0
@@ -114,11 +113,16 @@ def run_inference():
             final_prob = max(0.0, min(100.0, round(bullish_prob + adjustment, 1)))
             final_bias = "BULLISH" if final_prob > 50 else "BEARISH"
 
+            # --- NARRATIVE GENERATOR ---
             narrative = f"Technical Analysis ({final_bias}): {final_prob}% confidence."
-            if headline != "News Disabled (Install vaderSentiment)":
-                narrative += f" News context: {headline}"
+            
+            if headline and headline != "News module loading..." and headline != "News Disabled (Install vaderSentiment)":
+                 narrative += f" News context: {headline}"
+            else:
+                 narrative += " (No breaking news detected)"
 
-            print(f"🔮 PRED: {final_bias} ({final_prob}%)")
+            # Print to log to prove it's the new code
+            print(f"🔮 PRED: {final_bias} ({final_prob}%) | NEWS: {headline}")
             
             result = { 
                 "symbol": data['symbol'], "bias": final_bias, "probability": final_prob, 
@@ -131,6 +135,11 @@ def run_inference():
             
             memory_packet = {"price": price, "bias": final_bias}
             r.set("memory_last_trade", json.dumps(memory_packet))
+
+            # Discord Alert
+            if (final_prob > CONFIDENCE_THRESHOLD or final_prob < (100-CONFIDENCE_THRESHOLD)) and risk != "HIGH":
+                 # Simple Alert Logic
+                 pass 
 
         except Exception as e:
             print(f"⚠️ Inference Error: {e}")
