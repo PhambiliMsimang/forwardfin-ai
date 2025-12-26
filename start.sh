@@ -1,17 +1,14 @@
 #!/bin/bash
 
-# 1. Start Redis (The Memory)
-echo "--- Starting Redis ---"
-redis-server --daemonize yes
-sleep 2
+echo "🚀 STARTUP: Force-installing AI tools..."
+pip install --upgrade pip
+pip install vaderSentiment xgboost scikit-learn yfinance pandas numpy redis fastapi uvicorn requests
 
-# 2. Start the Unified Backend (The Megabot)
-# This runs Ingestion, Analysis, Inference, and Narrative in ONE process
-echo "--- Starting Unified Backend ---"
-python services/unified.py &
-sleep 5
+echo "✅ INSTALL COMPLETE. Starting Services..."
 
-# 3. Start the Professional Frontend (FastAPI)
-echo "--- Starting FastAPI Web Server ---"
-# We bind to 0.0.0.0 and use the PORT provided by Render
-uvicorn services.frontend.main:app --host 0.0.0.0 --port $PORT
+# Start the Backend Services in the background
+python services/analysis/main.py &
+python services/inference/main.py &
+
+# Start the Frontend (Main Entrypoint)
+uvicorn services.gateway.main:app --host 0.0.0.0 --port 10000
