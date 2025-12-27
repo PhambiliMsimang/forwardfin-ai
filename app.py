@@ -34,9 +34,7 @@ analyzer = SentimentIntensityAnalyzer()
 
 # --- 🔔 DISCORD ALERT SYSTEM ---
 def send_discord_alert(data):
-    # Alert max once every 15 mins
-    if time.time() - GLOBAL_MEMORY["last_alert_time"] < 900:
-        return
+    if time.time() - GLOBAL_MEMORY["last_alert_time"] < 900: return
 
     try:
         color = 5763719 if data['bias'] == "BULLISH" else 15548997
@@ -84,7 +82,7 @@ def run_fundamental_brain():
             # 1. Fetch News
             headlines = []
             avg_sentiment = 0.0
-            top_story = "No major news detected."
+            top_story = "No major news."
             try:
                 resp = requests.get("https://cointelegraph.com/rss", headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
                 root = ET.fromstring(resp.content)
@@ -98,7 +96,6 @@ def run_fundamental_brain():
             # 2. Analyze Technicals
             prices = GLOBAL_MEMORY["history"]
             if len(prices) > 20:
-                # RSI Calculation
                 series = pd.Series(prices)
                 delta = series.diff()
                 gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -107,21 +104,19 @@ def run_fundamental_brain():
                 rsi = 100 - (100 / (1 + rs))
                 rsi_val = rsi.iloc[-1] if not pd.isna(rsi.iloc[-1]) else 50
                 
-                # Volatility (Standard Deviation) for TP/SL
                 volatility = series.rolling(20).std().iloc[-1]
                 if pd.isna(volatility) or volatility == 0: volatility = 50.0 
 
-                # 3. Decision Logic
+                # Decision Logic
                 bias = "NEUTRAL"
                 prob = 50
                 entry = prices[-1]
                 
-                # Signal Generation
                 if rsi_val < 40 and avg_sentiment > -0.1:
                     bias = "BULLISH"
                     prob = 78 + (avg_sentiment * 10)
-                    tp = entry + (3 * volatility) # 3x Volatility Target
-                    sl = entry - (1.5 * volatility) # 1.5x Volatility Risk
+                    tp = entry + (3 * volatility)
+                    sl = entry - (1.5 * volatility)
                 
                 elif rsi_val > 60 and avg_sentiment < 0.1:
                     bias = "BEARISH"
@@ -133,16 +128,14 @@ def run_fundamental_brain():
                     tp = entry * 1.01
                     sl = entry * 0.99
 
-                # 4. Update Memory
                 prob = min(max(int(prob), 10), 95)
                 trade_setup = {"entry": entry, "tp": tp, "sl": sl, "valid": bias != "NEUTRAL"}
                 
-                # --- NEW: Enhanced Narrative Generator ---
                 sentiment_desc = "POSITIVE" if avg_sentiment > 0.05 else ("NEGATIVE" if avg_sentiment < -0.05 else "NEUTRAL")
                 
                 narrative = (
                     f"Market is {bias}. Fundamentals are {sentiment_desc} (Score: {avg_sentiment:.2f}) driven by top story: '{top_story}'. "
-                    f"Technicals show RSI at {rsi_val:.1f}. Stops adjusted for volatility (${volatility:.2f})."
+                    f"Technicals show RSI at {rsi_val:.1f}. Volatility-adjusted stops applied."
                 )
 
                 GLOBAL_MEMORY["prediction"] = {
@@ -152,7 +145,6 @@ def run_fundamental_brain():
                     "trade_setup": trade_setup
                 }
 
-                # 5. Send Alert
                 if prob > 75 and bias != "NEUTRAL":
                     send_discord_alert(GLOBAL_MEMORY["prediction"])
 
@@ -160,7 +152,7 @@ def run_fundamental_brain():
             print(f"❌ Brain Error: {e}", flush=True)
         time.sleep(10)
 
-# --- WORKER 3: THE ORIGINAL RICH WEBSITE (RESTORED & UPGRADED) ---
+# --- WORKER 3: THE RICH WEBSITE (Academy Updated) ---
 @app.get("/")
 async def root():
     return HTMLResponse("""
@@ -337,26 +329,26 @@ async def root():
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-12">
                     <h2 class="text-3xl font-bold text-slate-900">ForwardFin Academy</h2>
-                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">Interactive modules to help you master the AI's logic.</p>
+                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">Master institutional strategies (TTC Models).</p>
                 </div>
                 
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[500px]">
                     <div class="lg:col-span-4 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden overflow-y-auto">
                         <div onclick="loadLesson(0)" class="lesson-card p-4 border-b border-slate-200 active">
-                            <h4 class="font-bold text-slate-800">1. The Golden Rule</h4>
-                            <p class="text-xs text-slate-500 mt-1">Why we use a 2:1 Reward/Risk Ratio.</p>
+                            <h4 class="font-bold text-slate-800">1. The Asia Sweep</h4>
+                            <p class="text-xs text-slate-500 mt-1">Trading the London Session liquidity.</p>
                         </div>
                         <div onclick="loadLesson(1)" class="lesson-card p-4 border-b border-slate-200">
-                            <h4 class="font-bold text-slate-800">2. Understanding RSI</h4>
-                            <p class="text-xs text-slate-500 mt-1">Reading Overbought vs Oversold.</p>
+                            <h4 class="font-bold text-slate-800">2. Power of Divergences</h4>
+                            <p class="text-xs text-slate-500 mt-1">Correlation reversals (NQ vs ES).</p>
                         </div>
                         <div onclick="loadLesson(2)" class="lesson-card p-4 border-b border-slate-200">
-                            <h4 class="font-bold text-slate-800">3. Stop Loss Strategy</h4>
-                            <p class="text-xs text-slate-500 mt-1">Using Volatility to set safe stops.</p>
+                            <h4 class="font-bold text-slate-800">3. Deviation Levels</h4>
+                            <p class="text-xs text-slate-500 mt-1">Statistical Reversal Zones (-4).</p>
                         </div>
                         <div onclick="loadLesson(3)" class="lesson-card p-4 border-b border-slate-200">
-                            <h4 class="font-bold text-slate-800">4. Trading Sentiment</h4>
-                            <p class="text-xs text-slate-500 mt-1">Don't fight the news.</p>
+                            <h4 class="font-bold text-slate-800">4. Golden Rules</h4>
+                            <p class="text-xs text-slate-500 mt-1">Risk Management & Best Times.</p>
                         </div>
                     </div>
 
@@ -487,10 +479,8 @@ async def root():
             const data = await fetchMarketData();
             if (!data) return;
 
-            // Header Ticker
             document.getElementById('nav-ticker').innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> ${data.price.symbol}: $${data.price.price.toLocaleString()}`;
 
-            // Main Metrics
             globalConfidence = data.prediction.probability;
             document.getElementById('hero-bias').innerText = data.prediction.bias;
             if (heroChart) {
@@ -499,14 +489,12 @@ async def root():
                 heroChart.update();
             }
 
-            // Results Section Updates
             const riskText = document.getElementById('risk-text');
             if (riskText) {
                 if (data.prediction.probability > 80) riskText.innerText = "HIGH";
                 else riskText.innerText = "LOW";
             }
 
-            // Trade Setup Logic
             const setup = data.prediction.trade_setup;
             const validEl = document.getElementById('setup-validity');
             if (setup && setup.valid) {
@@ -542,43 +530,43 @@ async def root():
             }
         });
 
-        // --- 3. ACADEMY LOGIC ---
+        // --- 3. ACADEMY LOGIC UPDATED ---
         const lessons = [
             {
-                title: "1. The Golden Rule: 2:1 Ratio",
-                body: "Never enter a trade unless you can make $2 for every $1 you risk. <br><br>Imagine flipping a coin. If heads (win), you get $200. If tails (loss), you lose $100. Even if you only win 50% of the time, you will be profitable. <br><br>ForwardFin calculates this automatically in the Analysis section.",
-                question: "If your Stop Loss is $50 away, where should your Take Profit be?",
-                a: "$50 away (1:1)",
-                b: "$100 away (2:1)",
+                title: "1. The Asia Sweep (London Open)",
+                body: "This is a core institutional model. We look at the <b>Asia Session Range</b>. Liquidity (Stop losses) rests above the Highs and below the Lows. <br><br><b>The Strategy:</b> Wait for the London Session (8am - 10am). If price 'Sweeps' (breaks) the Asia High but then closes back inside, it's a fake-out. We frame a reversal trade targeting the opposite side.",
+                question: "What is the best time to trade the Asia Sweep model?",
+                a: "Late New York Session",
+                b: "London Session (8am - 10am)",
                 correct: "B",
-                explanation: "Correct! Risking $50 to make $100 creates a positive expectancy."
+                explanation: "Correct! This is when volatility kicks in to sweep liquidity."
             },
             {
-                title: "2. Understanding RSI",
-                body: "The Relative Strength Index (RSI) is like a speedometer for price. <br><br><b>Above 70:</b> The car is going too fast (Overbought). It might crash (reverse down). <br><b>Below 30:</b> The car is stopped (Oversold). It might start moving (reverse up). <br><br>ForwardFin uses this to decide if it's safe to buy.",
-                question: "RSI is at 85. What does this usually mean?",
-                a: "Price is Overbought (Likely to drop)",
-                b: "Price is Oversold (Likely to rise)",
-                correct: "A",
-                explanation: "Correct! High RSI (>70) suggests the buyers are exhausted."
+                title: "2. Power of Divergences",
+                body: "A Divergence is a crack in the market's armor. It happens when correlated assets disagree. <br><br><b>Bearish Divergence:</b> Asset A (e.g., NQ) makes a Higher High, but Asset B (e.g., ES) makes a Lower High. This shows weakness. <br><b>Bullish Divergence:</b> Asset A makes a Lower Low, but Asset B makes a Higher Low. This shows hidden strength.",
+                question: "Asset A makes a Higher High, Asset B makes a Lower High. What is this?",
+                a: "Bullish Continuation",
+                b: "Bearish Divergence (Reversal)",
+                correct: "B",
+                explanation: "Correct! Disagreement between assets often precedes a reversal."
             },
             {
-                title: "3. Stop Loss Placement",
-                body: "Where do you put your safety net? <br><br>If you put it too close, normal market wiggles will kick you out. If you put it too far, you lose too much money. <br><br>ForwardFin uses <b>Volatility</b>. We measure how much Bitcoin jumps around on average, and place the Stop Loss exactly 2 jumps away. This gives the trade room to breathe.",
-                question: "Why shouldn't you place a tight Stop Loss in a volatile market?",
-                a: "You will lose more money.",
-                b: "You will get stopped out by random noise.",
+                title: "3. Deviation Levels (-4)",
+                body: "Price doesn't move randomly; it moves in standard deviations. We use a tool to map these 'Red Levels': <b>-2, -2.5, and -4</b>. <br><br> These are extreme zones where price is statistically likely to snap back (Mean Reversion). <br><br>If price hits a -4 Deviation Level AND shows a Divergence, it is a high-confidence reversal trade.",
+                question: "Which Deviation Levels are considered key 'Reversal Zones'?",
+                a: "Levels 1 and 2",
+                b: "Levels -2, -2.5, and -4",
                 correct: "B",
-                explanation: "Correct! Volatile markets need wider stops to avoid random noise."
+                explanation: "Correct! These are the statistical extremes where reversals happen."
             },
             {
-                title: "4. Market Sentiment",
-                body: "Charts don't tell the whole story. News does. <br><br>ForwardFin reads CoinTelegraph RSS feeds every 60 seconds. If the news is scary (FUD), we lower our Buy confidence. If the news is hype, we increase it. <br><br>Never fight the news trend.",
-                question: "If RSI says BUY but News says SELL, what should you do?",
-                a: "Buy anyway.",
-                b: "Wait or Reduce Position Size.",
+                title: "4. Golden Rules: Risk & Timing",
+                body: "<b>1. Best Days:</b> Tuesday, Wednesday, and Thursday. Mondays and Fridays are often choppy. <br><b>2. Preservation:</b> Your #1 job is to not lose your account. <br><b>3. Stop Losses:</b> Never trade without one. It stops a scratch from becoming a gash.",
+                question: "Which days are generally considered the 'Best' for trading?",
+                a: "Monday & Friday",
+                b: "Tuesday, Wednesday, Thursday",
                 correct: "B",
-                explanation: "Correct! When signals conflict, cash is a position. Wait for clarity."
+                explanation: "Correct! Mid-week usually offers the cleanest price action."
             }
         ];
 
