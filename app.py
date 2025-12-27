@@ -13,8 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 # --- 🔧 CONFIGURATION ---
-# Discord Webhook inserted below
-DISCORD_WEBHOOK_URL = "https://discordapp.com/api/webhooks/1454098742218330307/gi8wvEn0pMcNsAWIR_kY5-_0_VE4CvsgWjkSXjCasXX-xUrydbhYtxHRLLLgiKxs_pLL" 
+DISCORD_WEBHOOK_URL = "https://discordapp.com/api/webhooks/1454098742218330307/gi8wvEn0pMcNsAWIR_kY5-_0_VE4CvsgWjkSXjCasXX-xUrydbhYtxHRLLLgiKxs_pLL"
 
 # --- 🧠 GLOBAL MEMORY ---
 GLOBAL_MEMORY = {
@@ -35,7 +34,7 @@ analyzer = SentimentIntensityAnalyzer()
 
 # --- 🔔 DISCORD ALERT SYSTEM ---
 def send_discord_alert(data):
-    # Don't spam: Only alert once every 15 minutes to keep it high quality
+    # Alert max once every 15 mins
     if time.time() - GLOBAL_MEMORY["last_alert_time"] < 900:
         return
 
@@ -46,11 +45,11 @@ def send_discord_alert(data):
             "description": data['narrative'],
             "color": color,
             "fields": [
-                {"name": "Entry Price", "value": f"${data['trade_setup']['entry']:,.2f}", "inline": True},
-                {"name": "🎯 Take Profit (2.0x)", "value": f"${data['trade_setup']['tp']:,.2f}", "inline": True},
-                {"name": "🛑 Stop Loss (1.0x)", "value": f"${data['trade_setup']['sl']:,.2f}", "inline": True}
+                {"name": "Entry", "value": f"${data['trade_setup']['entry']:,.2f}", "inline": True},
+                {"name": "🎯 Take Profit (2.0R)", "value": f"${data['trade_setup']['tp']:,.2f}", "inline": True},
+                {"name": "🛑 Stop Loss (1.0R)", "value": f"${data['trade_setup']['sl']:,.2f}", "inline": True}
             ],
-            "footer": {"text": "ForwardFin Academy • Learning through Live Action"}
+            "footer": {"text": "ForwardFin AI • Institutional Grade Analysis"}
         }
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
         GLOBAL_MEMORY["last_alert_time"] = time.time()
@@ -107,7 +106,6 @@ def run_fundamental_brain():
                 rsi_val = rsi.iloc[-1] if not pd.isna(rsi.iloc[-1]) else 50
                 
                 # Volatility (Standard Deviation) for TP/SL
-                # We use this to set dynamic stops based on market noise
                 volatility = series.rolling(20).std().iloc[-1]
                 if pd.isna(volatility) or volatility == 0: volatility = 50.0 
 
@@ -116,23 +114,20 @@ def run_fundamental_brain():
                 prob = 50
                 entry = prices[-1]
                 
-                # Signal Generation (Confluence of RSI + News)
+                # Signal Generation
                 if rsi_val < 40 and avg_sentiment > -0.1:
                     bias = "BULLISH"
                     prob = 78 + (avg_sentiment * 10)
-                    # Long Strategy: TP is 4x vol, SL is 2x vol (2:1 Ratio)
-                    tp = entry + (4 * volatility)
-                    sl = entry - (2 * volatility)
+                    tp = entry + (3 * volatility) # 3x Volatility Target
+                    sl = entry - (1.5 * volatility) # 1.5x Volatility Risk
                 
                 elif rsi_val > 60 and avg_sentiment < 0.1:
                     bias = "BEARISH"
                     prob = 78 - (avg_sentiment * 10)
-                    # Short Strategy
-                    tp = entry - (4 * volatility)
-                    sl = entry + (2 * volatility)
+                    tp = entry - (3 * volatility)
+                    sl = entry + (1.5 * volatility)
                 
                 else:
-                    # Neutral state - keep values strictly hypothetical
                     tp = entry * 1.01
                     sl = entry * 0.99
 
@@ -141,9 +136,8 @@ def run_fundamental_brain():
                 trade_setup = {"entry": entry, "tp": tp, "sl": sl, "valid": bias != "NEUTRAL"}
                 
                 narrative = (
-                    f"Market is {bias}. RSI ({rsi_val:.1f}) suggests {'oversold' if rsi_val<40 else 'overbought' if rsi_val>60 else 'neutral'} conditions. "
-                    f"News sentiment is {avg_sentiment:.2f}. "
-                    f"Stops set based on current volatility of ${volatility:.2f}."
+                    f"Market is {bias}. RSI ({rsi_val:.1f}) combined with News Sentiment ({avg_sentiment:.2f}). "
+                    f"Stop Loss calculated using Volatility (${volatility:.2f})."
                 )
 
                 GLOBAL_MEMORY["prediction"] = {
@@ -153,7 +147,7 @@ def run_fundamental_brain():
                     "trade_setup": trade_setup
                 }
 
-                # 5. Send Alert if Confidence > 75%
+                # 5. Send Alert
                 if prob > 75 and bias != "NEUTRAL":
                     send_discord_alert(GLOBAL_MEMORY["prediction"])
 
@@ -161,7 +155,7 @@ def run_fundamental_brain():
             print(f"❌ Brain Error: {e}", flush=True)
         time.sleep(10)
 
-# --- WORKER 3: THE WEBSITE ---
+# --- WORKER 3: THE ORIGINAL RICH WEBSITE (RESTORED & UPGRADED) ---
 @app.get("/")
 async def root():
     return HTMLResponse("""
@@ -170,188 +164,394 @@ async def root():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ForwardFin | Live Academy</title>
+    <title>ForwardFin | Live AI Terminal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #e2e8f0; }
-        .card { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 24px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); }
-        .btn { background: #0ea5e9; color: white; padding: 10px 20px; border-radius: 8px; font-weight: bold; transition: 0.2s; cursor: pointer; }
-        .btn:hover { background: #0284c7; transform: translateY(-1px); }
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; color: #334155; }
+        .chart-container { position: relative; width: 100%; max-width: 600px; margin: auto; height: 300px; }
+        @media (min-width: 768px) { .chart-container { height: 350px; } }
+        .arch-layer { transition: all 0.3s ease; cursor: pointer; border-left: 4px solid transparent; }
+        .arch-layer:hover { background-color: #f1f5f9; transform: translateX(4px); }
+        .arch-layer.active { background-color: #e0f2fe; border-left-color: #0284c7; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
         .lesson-card { cursor: pointer; transition: all 0.2s; border-left: 4px solid transparent; }
-        .lesson-card:hover { background: #334155; }
-        .lesson-card.active { background: #1e293b; border-left-color: #0ea5e9; }
-        .stat-box { background: rgba(15, 23, 42, 0.6); border-radius: 8px; padding: 12px; }
+        .lesson-card:hover { background: #f1f5f9; }
+        .lesson-card.active { background: #e0f2fe; border-left-color: #0284c7; }
+        .stat-box { background: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); }
     </style>
 </head>
-<body class="flex flex-col min-h-screen">
+<body class="bg-slate-50 text-slate-800 antialiased flex flex-col min-h-screen">
 
-    <nav class="border-b border-slate-700 bg-slate-900/80 backdrop-blur sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-            <div class="flex items-center gap-3">
-                <div class="h-8 w-8 bg-gradient-to-br from-sky-500 to-indigo-600 rounded-lg flex items-center justify-center text-white font-bold">FF</div>
-                <div class="font-black text-2xl text-white tracking-tighter">FORWARD<span class="text-sky-500">FIN</span></div>
+    <nav class="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-200 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16 items-center">
+                <div class="flex items-center gap-4">
+                    <div class="h-10 w-10 bg-slate-900 rounded-lg flex items-center justify-center text-white font-bold text-xl">FF</div>
+                    <div class="hidden md:block h-6 w-px bg-slate-300"></div>
+                    <div id="nav-ticker" class="font-mono text-sm font-bold text-slate-600 flex items-center gap-2">
+                        <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        Connecting...
+                    </div>
+                </div>
+                <div class="hidden md:flex space-x-8 text-sm font-medium text-slate-600">
+                    <a href="#overview" class="hover:text-sky-600 transition-colors">Terminal</a>
+                    <a href="#simulation" class="hover:text-sky-600 transition-colors">Analysis</a>
+                    <a href="#academy" class="hover:text-sky-600 transition-colors">Academy</a>
+                    <a href="#architecture" class="hover:text-sky-600 transition-colors">Architecture</a>
+                </div>
             </div>
-            <div id="price-ticker" class="font-mono text-emerald-400 font-bold bg-emerald-500/10 px-4 py-2 rounded-full border border-emerald-500/20">Connecting...</div>
         </div>
     </nav>
 
-    <main class="flex-grow max-w-7xl mx-auto w-full p-6 space-y-8">
-        
-        <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div class="card lg:col-span-1 space-y-6 flex flex-col justify-center">
-                <div>
-                    <div class="text-xs text-slate-400 uppercase font-bold tracking-widest mb-1">AI Signal</div>
-                    <div id="bias-display" class="text-5xl font-black text-white tracking-tight">---</div>
+    <main class="flex-grow">
+        <section id="overview" class="pt-20 pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+                <div class="space-y-6">
+                    <div id="hero-badge" class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold uppercase tracking-wide">
+                        System Status: ONLINE | LIVE DATA
+                    </div>
+                    <h1 class="text-4xl sm:text-5xl font-extrabold text-slate-900 leading-tight">
+                        Trading logic,<br>
+                        <span class="text-sky-600">powered by Real-Time AI.</span>
+                    </h1>
+                    <p class="text-lg text-slate-600 max-w-lg">
+                        ForwardFin is currently tracking <strong>BTC-USD</strong> on Coinbase. 
+                        It analyzes technicals and news sentiment to generate discord alerts and risk-managed trade setups.
+                    </p>
                 </div>
-                <div>
-                    <div class="flex justify-between text-sm text-slate-400 mb-2">
-                        <span>Confidence</span>
-                        <span id="conf-text" class="text-white font-bold">0%</span>
+                <div class="grid grid-cols-3 gap-4">
+                    <div class="bg-white p-4 rounded-2xl shadow-lg border border-slate-100 flex flex-col items-center">
+                        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">AI Confidence</h3>
+                        <div style="height: 100px; width: 100px; position: relative;"><canvas id="heroChart"></canvas></div>
+                        <p id="hero-bias" class="text-sm font-bold text-slate-800 mt-2">---</p>
                     </div>
-                    <div class="w-full bg-slate-700 h-3 rounded-full overflow-hidden">
-                        <div id="conf-bar" class="bg-sky-500 h-full w-0 transition-all duration-1000 ease-out"></div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card lg:col-span-2 flex flex-col justify-center relative overflow-hidden">
-                <div class="absolute top-0 right-0 p-4 opacity-10 text-9xl">🎯</div>
-                <div class="flex items-center justify-between mb-6">
-                    <div class="text-xs text-slate-400 uppercase font-bold tracking-widest">Suggested Trade Setup (2:1 Ratio)</div>
-                    <div id="setup-status" class="text-xs font-bold px-2 py-1 rounded bg-slate-700 text-slate-400">WAITING FOR SIGNAL</div>
-                </div>
-                
-                <div class="grid grid-cols-3 gap-4 text-center">
-                    <div class="stat-box border border-slate-600">
-                        <div class="text-slate-500 text-xs font-bold mb-1">ENTRY PRICE</div>
-                        <div id="setup-entry" class="text-2xl font-black text-white">---</div>
-                    </div>
-                    <div class="stat-box border border-emerald-500/30 bg-emerald-900/10">
-                        <div class="text-emerald-500 text-xs font-bold mb-1">TAKE PROFIT (Target)</div>
-                        <div id="setup-tp" class="text-2xl font-black text-emerald-400">---</div>
-                    </div>
-                    <div class="stat-box border border-rose-500/30 bg-rose-900/10">
-                        <div class="text-rose-500 text-xs font-bold mb-1">STOP LOSS (Risk)</div>
-                        <div id="setup-sl" class="text-2xl font-black text-rose-400">---</div>
-                    </div>
-                </div>
-                <div id="ai-narrative" class="mt-6 text-sm text-slate-300 font-mono bg-slate-900/50 p-4 rounded-lg border-l-4 border-sky-500">
-                    > System Initializing...
-                </div>
-            </div>
-        </section>
-
-        <section>
-            <div class="flex items-center gap-3 mb-6">
-                <span class="text-3xl">🎓</span>
-                <h2 class="text-3xl font-bold text-white">Trader's Academy</h2>
-            </div>
-            
-            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[600px]">
-                
-                <div class="lg:col-span-4 bg-slate-800 rounded-2xl overflow-y-auto border border-slate-700 custom-scroll">
-                    <div class="p-4 bg-slate-900/50 border-b border-slate-700 font-bold text-sky-400 text-sm">COURSE MODULES</div>
-                    <div onclick="loadLesson(0)" class="lesson-card p-5 border-b border-slate-700 active group">
-                        <h3 class="font-bold text-white group-hover:text-sky-400 transition-colors">1. The Golden Rule</h3>
-                        <p class="text-xs text-slate-400 mt-1">Risk Management & The 2:1 Ratio</p>
-                    </div>
-                    <div onclick="loadLesson(1)" class="lesson-card p-5 border-b border-slate-700 group">
-                        <h3 class="font-bold text-white group-hover:text-sky-400 transition-colors">2. Understanding RSI</h3>
-                        <p class="text-xs text-slate-400 mt-1">Detecting Overbought vs Oversold</p>
-                    </div>
-                    <div onclick="loadLesson(2)" class="lesson-card p-5 border-b border-slate-700 group">
-                        <h3 class="font-bold text-white group-hover:text-sky-400 transition-colors">3. Stop Loss Placement</h3>
-                        <p class="text-xs text-slate-400 mt-1">Using Volatility (ATR) to survive</p>
-                    </div>
-                    <div onclick="loadLesson(3)" class="lesson-card p-5 border-b border-slate-700 group">
-                        <h3 class="font-bold text-white group-hover:text-sky-400 transition-colors">4. Market Sentiment</h3>
-                        <p class="text-xs text-slate-400 mt-1">How News moves price</p>
-                    </div>
-                </div>
-
-                <div class="lg:col-span-8 bg-slate-800 rounded-2xl border border-slate-700 p-8 flex flex-col relative shadow-2xl">
-                    <h2 id="lesson-title" class="text-3xl font-black text-sky-400 mb-6">Select a Lesson</h2>
-                    <div id="lesson-body" class="text-slate-300 text-lg leading-relaxed mb-8 flex-grow overflow-y-auto pr-4">
-                        Welcome to the ForwardFin Academy. Click a module on the left to start learning how to trade professionally.
-                    </div>
-                    
-                    <div id="quiz-area" class="bg-slate-900/80 p-6 rounded-xl border border-slate-600 hidden backdrop-blur-sm">
-                        <div class="font-bold text-white mb-4 flex items-center gap-2"><span>💡</span> Quick Quiz</div>
-                        <p id="quiz-question" class="text-md text-slate-300 mb-6">Question goes here...</p>
-                        <div class="grid grid-cols-2 gap-4">
-                            <button id="btn-a" onclick="checkAnswer('A')" class="btn bg-slate-700 hover:bg-slate-600 border border-slate-600 py-3">Option A</button>
-                            <button id="btn-b" onclick="checkAnswer('B')" class="btn bg-slate-700 hover:bg-slate-600 border border-slate-600 py-3">Option B</button>
+                    <div class="bg-white p-4 rounded-2xl shadow-lg border border-slate-100 flex flex-col items-center">
+                        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Market Risk</h3>
+                        <div class="h-[100px] w-[100px] flex items-center justify-center relative">
+                            <div class="absolute inset-0 rounded-full border-8 border-slate-100"></div>
+                            <div id="risk-circle" class="absolute inset-0 rounded-full border-8 border-transparent border-t-emerald-500 transition-all duration-700 rotate-45"></div>
+                            <div class="text-center z-10"><span id="risk-text" class="text-xl font-black text-emerald-500">LOW</span></div>
                         </div>
-                        <div id="quiz-result" class="mt-4 text-center text-lg font-bold min-h-[30px]"></div>
+                        <p class="text-xs text-slate-400 mt-2">Volatility</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-2xl shadow-lg border border-slate-100 flex flex-col items-center justify-center">
+                        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Live Accuracy</h3>
+                        <div class="text-center my-2"><span id="win-rate" class="text-4xl font-black text-slate-800">0%</span></div>
+                        <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden mt-1 mb-2"><div id="win-bar" class="bg-slate-800 h-full w-0 transition-all duration-1000"></div></div>
+                        <p id="total-trades" class="text-xs text-slate-400">Calibrating...</p>
                     </div>
                 </div>
             </div>
         </section>
 
+        <section class="py-10 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+            <div class="bg-slate-900 rounded-2xl shadow-2xl border border-slate-800 overflow-hidden">
+                <div class="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 backdrop-blur">
+                    <h3 class="font-bold text-white flex items-center gap-2"><span>📈</span> Institutional Price Action</h3>
+                    <span class="text-xs text-slate-500 font-mono">SOURCE: TRADINGVIEW</span>
+                </div>
+                <div class="h-[500px] w-full" id="tradingview_chart"></div>
+                <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+                <script type="text/javascript">
+                new TradingView.widget({ "autosize": true, "symbol": "COINBASE:BTCUSD", "interval": "1", "timezone": "Etc/UTC", "theme": "dark", "style": "1", "locale": "en", "toolbar_bg": "#f1f3f6", "enable_publishing": false, "hide_side_toolbar": false, "allow_symbol_change": true, "container_id": "tradingview_chart", "studies": ["RSI@tv-basicstudies", "MASimple@tv-basicstudies"] });
+                </script>
+            </div>
+        </section>
+
+        <section id="simulation" class="py-20 bg-slate-900 text-white">
+            <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="text-center mb-10">
+                    <h2 class="text-3xl font-bold">Live Market Breakdown</h2>
+                    <p class="mt-2 text-slate-400">Real-time Trade Architect</p>
+                </div>
+                <div class="bg-slate-800 rounded-2xl shadow-2xl overflow-hidden relative min-h-[400px] flex flex-col border border-slate-700">
+                    <div class="p-4 border-b border-slate-700 bg-slate-800/50 flex justify-between items-center">
+                        <div class="font-mono text-sky-400">TARGET: BTC-USD (Live)</div>
+                        <button id="analyze-btn" class="bg-sky-600 hover:bg-sky-500 text-white px-6 py-2 rounded text-sm font-bold transition-all shadow-lg">REFRESH ANALYSIS</button>
+                    </div>
+                    <div class="flex-grow p-8 relative">
+                        <div id="sim-results" class="h-full flex flex-col md:flex-row gap-6">
+                            
+                            <div class="w-full md:w-1/3 flex flex-col gap-4">
+                                <div class="bg-slate-700/50 p-4 rounded-lg border border-slate-600">
+                                    <span class="text-xs text-slate-400 uppercase">Current Price</span>
+                                    <div id="res-price" class="text-3xl font-mono font-bold text-white mt-1">---</div>
+                                </div>
+                                <div class="bg-slate-700/50 p-4 rounded-lg border border-slate-600">
+                                    <span class="text-xs text-slate-400 uppercase">AI Signal</span>
+                                    <div id="res-bias" class="text-xl font-bold mt-1 text-slate-300">---</div>
+                                </div>
+                                <div class="bg-slate-700/50 p-4 rounded-lg border border-slate-600">
+                                    <span class="text-xs text-slate-400 uppercase">Model Confidence</span>
+                                    <div id="res-prob" class="text-4xl font-bold text-sky-400 mt-1">---%</div>
+                                    <div class="w-full bg-slate-900 h-1.5 mt-2 rounded-full overflow-hidden">
+                                        <div id="prob-bar" class="bg-sky-500 h-full w-0 transition-all duration-1000"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="w-full md:w-2/3 flex flex-col gap-4">
+                                <div class="bg-slate-700/30 rounded-lg border border-slate-600 p-4">
+                                    <div class="flex justify-between items-center mb-3">
+                                        <h4 class="text-xs font-bold text-sky-400 uppercase">Suggested Trade Setup (2:1 Reward)</h4>
+                                        <span id="setup-validity" class="text-[10px] bg-slate-700 px-2 py-1 rounded">WAITING</span>
+                                    </div>
+                                    <div class="grid grid-cols-3 gap-3 text-center">
+                                        <div class="bg-slate-800 p-2 rounded border border-slate-600">
+                                            <div class="text-[10px] text-slate-400">ENTRY</div>
+                                            <div id="setup-entry" class="text-white font-bold">---</div>
+                                        </div>
+                                        <div class="bg-emerald-900/20 p-2 rounded border border-emerald-500/30">
+                                            <div class="text-[10px] text-emerald-400">TAKE PROFIT</div>
+                                            <div id="setup-tp" class="text-emerald-400 font-bold">---</div>
+                                        </div>
+                                        <div class="bg-rose-900/20 p-2 rounded border border-rose-500/30">
+                                            <div class="text-[10px] text-rose-400">STOP LOSS</div>
+                                            <div id="setup-sl" class="text-rose-400 font-bold">---</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="bg-slate-700/30 rounded-lg border border-slate-600 p-6 relative overflow-hidden flex-grow">
+                                    <div class="absolute top-0 left-0 w-1 h-full bg-sky-500"></div>
+                                    <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2"><span>🤖</span> AI Reasoning</h3>
+                                    <p id="res-reason" class="text-slate-300 leading-relaxed font-light text-lg">Waiting for analysis command...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="academy" class="py-16 bg-white border-t border-slate-200">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="text-center mb-12">
+                    <h2 class="text-3xl font-bold text-slate-900">ForwardFin Academy</h2>
+                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">Interactive modules to help you master the AI's logic.</p>
+                </div>
+                
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[500px]">
+                    <div class="lg:col-span-4 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden overflow-y-auto">
+                        <div onclick="loadLesson(0)" class="lesson-card p-4 border-b border-slate-200 active">
+                            <h4 class="font-bold text-slate-800">1. The Golden Rule</h4>
+                            <p class="text-xs text-slate-500 mt-1">Why we use a 2:1 Reward/Risk Ratio.</p>
+                        </div>
+                        <div onclick="loadLesson(1)" class="lesson-card p-4 border-b border-slate-200">
+                            <h4 class="font-bold text-slate-800">2. Understanding RSI</h4>
+                            <p class="text-xs text-slate-500 mt-1">Reading Overbought vs Oversold.</p>
+                        </div>
+                        <div onclick="loadLesson(2)" class="lesson-card p-4 border-b border-slate-200">
+                            <h4 class="font-bold text-slate-800">3. Stop Loss Strategy</h4>
+                            <p class="text-xs text-slate-500 mt-1">Using Volatility to set safe stops.</p>
+                        </div>
+                        <div onclick="loadLesson(3)" class="lesson-card p-4 border-b border-slate-200">
+                            <h4 class="font-bold text-slate-800">4. Trading Sentiment</h4>
+                            <p class="text-xs text-slate-500 mt-1">Don't fight the news.</p>
+                        </div>
+                    </div>
+
+                    <div class="lg:col-span-8 bg-white border border-slate-200 rounded-xl p-8 flex flex-col shadow-sm">
+                        <h3 id="lesson-title" class="text-2xl font-bold text-sky-600 mb-4">Select a Lesson</h3>
+                        <div id="lesson-body" class="text-slate-600 leading-relaxed mb-8 flex-grow">
+                            Click a module on the left to start learning.
+                        </div>
+                        <div id="quiz-area" class="bg-slate-50 p-6 rounded-lg border border-slate-200 hidden">
+                            <div class="font-bold text-slate-800 mb-2">💡 Quick Quiz</div>
+                            <p id="quiz-question" class="text-sm text-slate-600 mb-4">...</p>
+                            <div class="flex gap-4">
+                                <button id="btn-a" onclick="checkAnswer('A')" class="px-4 py-2 bg-white border border-slate-300 rounded hover:bg-slate-100 text-sm font-bold text-slate-700">Option A</button>
+                                <button id="btn-b" onclick="checkAnswer('B')" class="px-4 py-2 bg-white border border-slate-300 rounded hover:bg-slate-100 text-sm font-bold text-slate-700">Option B</button>
+                            </div>
+                            <div id="quiz-result" class="mt-3 text-sm font-bold"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="architecture" class="py-16 bg-slate-50 border-t border-slate-200">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="mb-10">
+                    <h2 class="text-3xl font-bold text-slate-900">System Architecture</h2>
+                    <p class="mt-4 text-slate-600 max-w-3xl">ForwardFin is built on a modular 5-layer stack. Click any layer for details.</p>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                    <div class="lg:col-span-5 space-y-3">
+                        <div onclick="selectLayer(0)" class="arch-layer active bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
+                            <div><h4 class="font-bold text-slate-800">1. Data Ingestion</h4><p class="text-xs text-slate-500 mt-1">Coinbase API / CoinTelegraph RSS</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
+                        </div>
+                        <div onclick="selectLayer(1)" class="arch-layer bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
+                            <div><h4 class="font-bold text-slate-800">2. Analysis Engine</h4><p class="text-xs text-slate-500 mt-1">Pandas / NumPy / VADER</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
+                        </div>
+                        <div onclick="selectLayer(2)" class="arch-layer bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
+                            <div><h4 class="font-bold text-slate-800">3. AI / ML Core</h4><p class="text-xs text-slate-500 mt-1">Sentiment & Technical Confluence</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
+                        </div>
+                        <div onclick="selectLayer(3)" class="arch-layer bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
+                            <div><h4 class="font-bold text-slate-800">4. Alerting Layer</h4><p class="text-xs text-slate-500 mt-1">Discord Webhooks</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
+                        </div>
+                        <div onclick="selectLayer(4)" class="arch-layer bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
+                            <div><h4 class="font-bold text-slate-800">5. User Interface</h4><p class="text-xs text-slate-500 mt-1">FastAPI / Tailwind / JS</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
+                        </div>
+                    </div>
+                    <div class="lg:col-span-7">
+                        <div class="bg-white rounded-xl shadow-lg border border-slate-200 h-full p-6 flex flex-col">
+                            <div class="flex justify-between items-center mb-4 border-b border-slate-100 pb-4">
+                                <h3 id="detail-title" class="text-xl font-bold text-slate-800">Data Ingestion</h3>
+                                <span id="detail-badge" class="px-2 py-1 bg-sky-100 text-sky-700 text-xs rounded font-mono">Infrastructure</span>
+                            </div>
+                            <p id="detail-desc" class="text-slate-600 mb-6 flex-grow">Handles real-time price ticks from Coinbase and Sentiment from News Feeds.</p>
+                            <h5 class="font-semibold text-slate-800 mb-3 text-sm uppercase">Tech Stack</h5>
+                            <ul id="detail-list" class="space-y-3"></ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
     </main>
 
+    <footer class="bg-slate-900 text-slate-400 py-12 border-t border-slate-800 text-center">
+        <p class="text-sm mb-6">Democratizing financial intelligence.</p>
+        <div class="text-xs text-slate-600">&copy; 2025 ForwardFin. All rights reserved.</div>
+    </footer>
+
     <script>
-        // --- LIVE DATA FEED ---
-        async function updateData() {
-            try {
-                const res = await fetch('/api/live-data');
-                const data = await res.json();
-                
-                // Update Price
-                document.getElementById('price-ticker').innerText = `${data.price.symbol}: $${data.price.price.toLocaleString()}`;
-                
-                // Update Bias
-                const bias = data.prediction.bias;
-                const biasEl = document.getElementById('bias-display');
-                biasEl.innerText = bias;
-                biasEl.className = bias === "BULLISH" ? "text-5xl font-black text-emerald-400 tracking-tight" : (bias === "BEARISH" ? "text-5xl font-black text-rose-400 tracking-tight" : "text-5xl font-black text-slate-400 tracking-tight");
-                
-                // Update Confidence
-                document.getElementById('conf-text').innerText = data.prediction.probability + "%";
-                document.getElementById('conf-bar').style.width = data.prediction.probability + "%";
-                
-                // Update Narrative
-                document.getElementById('ai-narrative').innerText = "> " + data.prediction.narrative;
+        // --- 1. ARCHITECTURE INTERACTIVITY ---
+        const architectureData = [
+            { title: "Data Ingestion", badge: "Infrastructure", description: "Connects to Coinbase Pro API for real-time price ticks and CoinTelegraph RSS for news headlines.", components: ["Coinbase API", "Python Requests", "XML Parsing"] },
+            { title: "Analysis Engine", badge: "Data Science", description: "Calculates live RSI, Volatility (Std Dev), and moving averages using Pandas.", components: ["Pandas Rolling Windows", "NumPy Math"] },
+            { title: "AI / ML Core", badge: "Machine Learning", description: "Uses VADER (Valence Aware Dictionary for Sentiment Reasoning) to score news, then combines it with Technicals.", components: ["VADER Sentiment", "Logic Gates", "Risk Calc"] },
+            { title: "Alerting Layer", badge: "Notification", description: "When Confidence > 75%, constructs a rich embed payload and fires it to the Discord Webhook.", components: ["Discord API", "JSON Payloads"] },
+            { title: "User Interface", badge: "Frontend", description: "Responsive dashboard served via FastAPI. Updates DOM elements live without refreshing.", components: ["FastAPI", "Tailwind CSS", "Chart.js", "TradingView"] }
+        ];
 
-                // Update Trade Setup
-                const setup = data.prediction.trade_setup;
-                const statusEl = document.getElementById('setup-status');
-                
-                if (setup && setup.valid) {
-                    statusEl.innerText = "ACTIVE SETUP";
-                    statusEl.className = "text-xs font-bold px-2 py-1 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
-                    document.getElementById('setup-entry').innerText = "$" + setup.entry.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                    document.getElementById('setup-tp').innerText = "$" + setup.tp.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                    document.getElementById('setup-sl').innerText = "$" + setup.sl.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                } else {
-                    statusEl.innerText = "WAITING FOR SIGNAL";
-                    statusEl.className = "text-xs font-bold px-2 py-1 rounded bg-slate-700 text-slate-400";
-                    document.getElementById('setup-entry').innerText = "---";
-                    document.getElementById('setup-tp').innerText = "---";
-                    document.getElementById('setup-sl').innerText = "---";
-                }
-
-            } catch(e) { console.log(e); }
+        function selectLayer(index) {
+            document.querySelectorAll('.arch-layer').forEach((el, i) => {
+                if (i === index) el.classList.add('active', 'bg-sky-50', 'border-l-sky-600');
+                else el.classList.remove('active', 'bg-sky-50', 'border-l-sky-600');
+            });
+            const data = architectureData[index];
+            document.getElementById('detail-title').innerText = data.title;
+            document.getElementById('detail-badge').innerText = data.badge;
+            document.getElementById('detail-desc').innerText = data.description;
+            const list = document.getElementById('detail-list');
+            list.innerHTML = '';
+            data.components.forEach(comp => { list.innerHTML += `<li class="flex items-start text-sm text-slate-700"><span class="w-1.5 h-1.5 bg-sky-500 rounded-full mt-1.5 mr-2"></span>${comp}</li>`; });
         }
-        setInterval(updateData, 3000);
 
-        // --- ACADEMY CONTENT ---
+        // --- 2. LIVE DASHBOARD UPDATES ---
+        let globalConfidence = 0;
+        let heroChart = null;
+
+        function initHeroChart() {
+            const ctx = document.getElementById('heroChart').getContext('2d');
+            heroChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: { labels: ['Confidence', 'Uncertainty'], datasets: [{ data: [0, 100], backgroundColor: ['#0ea5e9', '#e2e8f0'], borderWidth: 0 }] },
+                options: { responsive: true, maintainAspectRatio: false, cutout: '75%', plugins: { legend: { display: false }, tooltip: { enabled: false } }, animation: { duration: 1000 } },
+                plugins: [{
+                    id: 'textCenter',
+                    beforeDraw: function(chart) {
+                        var width = chart.width, height = chart.height, ctx = chart.ctx;
+                        ctx.restore();
+                        var fontSize = (height / 100).toFixed(2);
+                        ctx.font = "bold " + fontSize + "em sans-serif";
+                        ctx.textBaseline = "middle";
+                        ctx.fillStyle = "#0f172a"; 
+                        var text = globalConfidence + "%", textX = Math.round((width - ctx.measureText(text).width) / 2), textY = height / 2;
+                        ctx.fillText(text, textX, textY);
+                        ctx.save();
+                    }
+                }]
+            });
+        }
+
+        async function fetchMarketData() {
+            try {
+                const response = await fetch('/api/live-data');
+                const data = await response.json();
+                return data;
+            } catch (e) { console.error(e); return null; }
+        }
+
+        async function updateDashboard() {
+            const data = await fetchMarketData();
+            if (!data) return;
+
+            // Header Ticker
+            document.getElementById('nav-ticker').innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> ${data.price.symbol}: $${data.price.price.toLocaleString()}`;
+
+            // Main Metrics
+            globalConfidence = data.prediction.probability;
+            document.getElementById('hero-bias').innerText = data.prediction.bias;
+            if (heroChart) {
+                heroChart.data.datasets[0].data = [globalConfidence, 100 - globalConfidence];
+                heroChart.data.datasets[0].backgroundColor = (data.prediction.bias === "BULLISH") ? ['#10b981', '#e2e8f0'] : ['#f43f5e', '#e2e8f0'];
+                heroChart.update();
+            }
+
+            // Results Section Updates
+            const riskText = document.getElementById('risk-text');
+            if (riskText) {
+                if (data.prediction.probability > 80) riskText.innerText = "HIGH";
+                else riskText.innerText = "LOW";
+            }
+
+            // Trade Setup Logic
+            const setup = data.prediction.trade_setup;
+            const validEl = document.getElementById('setup-validity');
+            if (setup && setup.valid) {
+                if(validEl) { validEl.innerText = "ACTIVE"; validEl.className = "text-[10px] bg-emerald-600 px-2 py-1 rounded text-white"; }
+                document.getElementById('setup-entry').innerText = "$" + setup.entry.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                document.getElementById('setup-tp').innerText = "$" + setup.tp.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                document.getElementById('setup-sl').innerText = "$" + setup.sl.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            } else {
+                if(validEl) { validEl.innerText = "WAITING"; validEl.className = "text-[10px] bg-slate-700 px-2 py-1 rounded text-slate-400"; }
+            }
+        }
+
+        document.getElementById('analyze-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('analyze-btn');
+            btn.innerText = "ANALYZING...";
+            btn.disabled = true;
+            
+            const data = await fetchMarketData();
+            await new Promise(r => setTimeout(r, 800)); // Fake delay for effect
+            
+            btn.innerText = "REFRESH ANALYSIS";
+            btn.disabled = false;
+
+            if (data) {
+                document.getElementById('res-price').innerText = "$" + data.price.price.toLocaleString();
+                const biasEl = document.getElementById('res-bias');
+                biasEl.innerText = data.prediction.bias;
+                biasEl.className = (data.prediction.bias === "BULLISH") ? "text-xl font-bold mt-1 text-emerald-400" : "text-xl font-bold mt-1 text-rose-400";
+                
+                document.getElementById('res-prob').innerText = data.prediction.probability + "%";
+                document.getElementById('prob-bar').style.width = data.prediction.probability + "%";
+                document.getElementById('res-reason').innerText = data.prediction.narrative;
+            }
+        });
+
+        // --- 3. ACADEMY LOGIC ---
         const lessons = [
             {
                 title: "1. The Golden Rule: 2:1 Ratio",
-                body: "Never enter a trade unless you can make $2 for every $1 you risk. <br><br>Imagine flipping a coin. If heads (win), you get $200. If tails (loss), you lose $100. Even if you only win 50% of the time, you will be profitable. <br><br><b>ForwardFin calculates this automatically:</b> Look at the trade card above. The Green number (TP) is always 2x larger than the distance to the Red number (SL).",
-                question: "If your Stop Loss risks $50, where should your Take Profit be?",
-                a: "$50 profit (1:1 Ratio)",
-                b: "$100 profit (2:1 Ratio)",
+                body: "Never enter a trade unless you can make $2 for every $1 you risk. <br><br>Imagine flipping a coin. If heads (win), you get $200. If tails (loss), you lose $100. Even if you only win 50% of the time, you will be profitable. <br><br>ForwardFin calculates this automatically in the Analysis section.",
+                question: "If your Stop Loss is $50 away, where should your Take Profit be?",
+                a: "$50 away (1:1)",
+                b: "$100 away (2:1)",
                 correct: "B",
                 explanation: "Correct! Risking $50 to make $100 creates a positive expectancy."
             },
             {
                 title: "2. Understanding RSI",
-                body: "The Relative Strength Index (RSI) is like a speedometer for price. <br><br><b>Above 70 (Overbought):</b> The car is going too fast. It might crash (reverse down). <br><b>Below 30 (Oversold):</b> The car is stopped. It might start moving (reverse up). <br><br>ForwardFin uses this to decide if it's safe to buy. We rarely buy when RSI is > 70.",
-                question: "RSI is currently at 85. What does this usually mean?",
+                body: "The Relative Strength Index (RSI) is like a speedometer for price. <br><br><b>Above 70:</b> The car is going too fast (Overbought). It might crash (reverse down). <br><b>Below 30:</b> The car is stopped (Oversold). It might start moving (reverse up). <br><br>ForwardFin uses this to decide if it's safe to buy.",
+                question: "RSI is at 85. What does this usually mean?",
                 a: "Price is Overbought (Likely to drop)",
                 b: "Price is Oversold (Likely to rise)",
                 correct: "A",
@@ -359,7 +559,7 @@ async def root():
             },
             {
                 title: "3. Stop Loss Placement",
-                body: "Where do you put your safety net? <br><br>If you put it too close, normal market wiggles will kick you out. If you put it too far, you lose too much money. <br><br>ForwardFin uses <b>Volatility (Standard Deviation)</b>. We measure how much Bitcoin jumps around on average, and place the Stop Loss exactly 2 jumps away. This gives the trade room to breathe.",
+                body: "Where do you put your safety net? <br><br>If you put it too close, normal market wiggles will kick you out. If you put it too far, you lose too much money. <br><br>ForwardFin uses <b>Volatility</b>. We measure how much Bitcoin jumps around on average, and place the Stop Loss exactly 2 jumps away. This gives the trade room to breathe.",
                 question: "Why shouldn't you place a tight Stop Loss in a volatile market?",
                 a: "You will lose more money.",
                 b: "You will get stopped out by random noise.",
@@ -368,8 +568,8 @@ async def root():
             },
             {
                 title: "4. Market Sentiment",
-                body: "Charts don't tell the whole story. News does. <br><br>ForwardFin reads CoinTelegraph RSS feeds every 60 seconds using an AI library called VADER. <br><br>If the news is scary (FUD), we lower our Buy confidence. If the news is hype, we increase it. <br><br><b>Never fight the news trend.</b>",
-                question: "If RSI says BUY but News says SELL (Bad News), what should you do?",
+                body: "Charts don't tell the whole story. News does. <br><br>ForwardFin reads CoinTelegraph RSS feeds every 60 seconds. If the news is scary (FUD), we lower our Buy confidence. If the news is hype, we increase it. <br><br>Never fight the news trend.",
+                question: "If RSI says BUY but News says SELL, what should you do?",
                 a: "Buy anyway.",
                 b: "Wait or Reduce Position Size.",
                 correct: "B",
@@ -390,10 +590,9 @@ async def root():
             document.getElementById('btn-b').innerText = l.b;
             document.getElementById('quiz-result').innerText = "";
             
-            // Update active state in menu
             document.querySelectorAll('.lesson-card').forEach((el, i) => {
-                if(i === index) el.classList.add('active', 'bg-slate-700', 'border-l-sky-500');
-                else el.classList.remove('active', 'bg-slate-700', 'border-l-sky-500');
+                if(i === index) el.classList.add('active', 'bg-sky-50', 'border-l-sky-600');
+                else el.classList.remove('active', 'bg-sky-50', 'border-l-sky-600');
             });
         }
 
@@ -401,14 +600,19 @@ async def root():
             const l = lessons[currentLesson];
             const res = document.getElementById('quiz-result');
             if (answer === l.correct) {
-                res.innerHTML = `<span class="text-emerald-400">✅ ${l.explanation}</span>`;
+                res.innerHTML = `<span class="text-emerald-600">✅ ${l.explanation}</span>`;
             } else {
-                res.innerHTML = `<span class="text-rose-400">❌ Incorrect. Try again!</span>`;
+                res.innerHTML = `<span class="text-rose-600">❌ Incorrect. Try again!</span>`;
             }
         }
 
-        // Load first lesson on start
-        loadLesson(0);
+        document.addEventListener('DOMContentLoaded', () => {
+            initHeroChart();
+            selectLayer(0);
+            loadLesson(0);
+            updateDashboard();
+            setInterval(updateDashboard, 3000);
+        });
     </script>
 </body>
 </html>
