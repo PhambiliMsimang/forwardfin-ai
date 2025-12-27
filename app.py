@@ -84,6 +84,7 @@ def run_fundamental_brain():
             # 1. Fetch News
             headlines = []
             avg_sentiment = 0.0
+            top_story = "No major news detected."
             try:
                 resp = requests.get("https://cointelegraph.com/rss", headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
                 root = ET.fromstring(resp.content)
@@ -91,6 +92,7 @@ def run_fundamental_brain():
                     headlines.append(item.find('title').text)
                 if headlines:
                     avg_sentiment = sum([analyzer.polarity_scores(h)['compound'] for h in headlines]) / len(headlines)
+                    top_story = headlines[0]
             except: pass
 
             # 2. Analyze Technicals
@@ -135,9 +137,12 @@ def run_fundamental_brain():
                 prob = min(max(int(prob), 10), 95)
                 trade_setup = {"entry": entry, "tp": tp, "sl": sl, "valid": bias != "NEUTRAL"}
                 
+                # --- NEW: Enhanced Narrative Generator ---
+                sentiment_desc = "POSITIVE" if avg_sentiment > 0.05 else ("NEGATIVE" if avg_sentiment < -0.05 else "NEUTRAL")
+                
                 narrative = (
-                    f"Market is {bias}. RSI ({rsi_val:.1f}) combined with News Sentiment ({avg_sentiment:.2f}). "
-                    f"Stop Loss calculated using Volatility (${volatility:.2f})."
+                    f"Market is {bias}. Fundamentals are {sentiment_desc} (Score: {avg_sentiment:.2f}) driven by top story: '{top_story}'. "
+                    f"Technicals show RSI at {rsi_val:.1f}. Stops adjusted for volatility (${volatility:.2f})."
                 )
 
                 GLOBAL_MEMORY["prediction"] = {
