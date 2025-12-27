@@ -98,12 +98,15 @@ def run_fundamental_brain():
             if len(prices) > 20:
                 series = pd.Series(prices)
                 delta = series.diff()
+                
+                # RSI Calculation
                 gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
                 loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
                 rs = gain / loss
                 rsi = 100 - (100 / (1 + rs))
                 rsi_val = rsi.iloc[-1] if not pd.isna(rsi.iloc[-1]) else 50
                 
+                # Volatility
                 volatility = series.rolling(20).std().iloc[-1]
                 if pd.isna(volatility) or volatility == 0: volatility = 50.0 
 
@@ -152,7 +155,7 @@ def run_fundamental_brain():
             print(f"❌ Brain Error: {e}", flush=True)
         time.sleep(10)
 
-# --- WORKER 3: THE RICH WEBSITE (Academy Updated) ---
+# --- WORKER 3: THE RICH WEBSITE (Academy V2) ---
 @app.get("/")
 async def root():
     return HTMLResponse("""
@@ -329,32 +332,36 @@ async def root():
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-12">
                     <h2 class="text-3xl font-bold text-slate-900">ForwardFin Academy</h2>
-                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">Master institutional strategies (TTC Models).</p>
+                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">From Zero to Institutional Trader.</p>
                 </div>
                 
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[500px]">
                     <div class="lg:col-span-4 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden overflow-y-auto">
                         <div onclick="loadLesson(0)" class="lesson-card p-4 border-b border-slate-200 active">
-                            <h4 class="font-bold text-slate-800">1. The Asia Sweep</h4>
-                            <p class="text-xs text-slate-500 mt-1">Trading the London Session liquidity.</p>
+                            <h4 class="font-bold text-slate-800">1. Basics: Structure & Candles</h4>
+                            <p class="text-xs text-slate-500 mt-1">Start here if you are brand new.</p>
                         </div>
                         <div onclick="loadLesson(1)" class="lesson-card p-4 border-b border-slate-200">
-                            <h4 class="font-bold text-slate-800">2. Power of Divergences</h4>
-                            <p class="text-xs text-slate-500 mt-1">Correlation reversals (NQ vs ES).</p>
+                            <h4 class="font-bold text-slate-800">2. Liquidity: The Fuel</h4>
+                            <p class="text-xs text-slate-500 mt-1">Why price moves where it moves.</p>
                         </div>
                         <div onclick="loadLesson(2)" class="lesson-card p-4 border-b border-slate-200">
-                            <h4 class="font-bold text-slate-800">3. Deviation Levels</h4>
-                            <p class="text-xs text-slate-500 mt-1">Statistical Reversal Zones (-4).</p>
+                            <h4 class="font-bold text-slate-800">3. Strategy: The Asia Sweep</h4>
+                            <p class="text-xs text-slate-500 mt-1">Trading the London Open fakeout.</p>
                         </div>
                         <div onclick="loadLesson(3)" class="lesson-card p-4 border-b border-slate-200">
-                            <h4 class="font-bold text-slate-800">4. Golden Rules</h4>
-                            <p class="text-xs text-slate-500 mt-1">Risk Management & Best Times.</p>
+                            <h4 class="font-bold text-slate-800">4. Strategy: Divergences</h4>
+                            <p class="text-xs text-slate-500 mt-1">Spotting reversals with ES/NQ.</p>
+                        </div>
+                        <div onclick="loadLesson(4)" class="lesson-card p-4 border-b border-slate-200">
+                            <h4 class="font-bold text-slate-800">5. Risk: Survival Rules</h4>
+                            <p class="text-xs text-slate-500 mt-1">Position sizing for small accounts.</p>
                         </div>
                     </div>
 
                     <div class="lg:col-span-8 bg-white border border-slate-200 rounded-xl p-8 flex flex-col shadow-sm">
                         <h3 id="lesson-title" class="text-2xl font-bold text-sky-600 mb-4">Select a Lesson</h3>
-                        <div id="lesson-body" class="text-slate-600 leading-relaxed mb-8 flex-grow">
+                        <div id="lesson-body" class="text-slate-600 leading-relaxed mb-8 flex-grow overflow-y-auto">
                             Click a module on the left to start learning.
                         </div>
                         <div id="quiz-area" class="bg-slate-50 p-6 rounded-lg border border-slate-200 hidden">
@@ -530,43 +537,52 @@ async def root():
             }
         });
 
-        // --- 3. ACADEMY LOGIC UPDATED ---
+        // --- 3. ACADEMY LOGIC (BEGINNER FRIENDLY) ---
         const lessons = [
             {
-                title: "1. The Asia Sweep (London Open)",
-                body: "This is a core institutional model. We look at the <b>Asia Session Range</b>. Liquidity (Stop losses) rests above the Highs and below the Lows. <br><br><b>The Strategy:</b> Wait for the London Session (8am - 10am). If price 'Sweeps' (breaks) the Asia High but then closes back inside, it's a fake-out. We frame a reversal trade targeting the opposite side.",
-                question: "What is the best time to trade the Asia Sweep model?",
-                a: "Late New York Session",
-                b: "London Session (8am - 10am)",
+                title: "1. Basics: Structure & Candles",
+                body: "Before we trade, we must understand the language of the market. <br><br><b>1. Candlesticks:</b> A green candle means price went UP (Closed higher than it Opened). A red candle means price went DOWN. The 'Wicks' (thin lines) show how far price reached before pulling back. <br><br><b>2. Trends:</b> Prices don't move in straight lines. They move in waves. <br>- <b>Uptrend:</b> Making Higher Highs and Higher Lows. <br>- <b>Downtrend:</b> Making Lower Highs and Lower Lows.",
+                question: "In an Uptrend, what should you generally look for?",
+                a: "Lower Highs",
+                b: "Higher Highs",
                 correct: "B",
-                explanation: "Correct! This is when volatility kicks in to sweep liquidity."
+                explanation: "Correct! Uptrends are defined by price consistently making new highs."
             },
             {
-                title: "2. Power of Divergences",
-                body: "A Divergence is a crack in the market's armor. It happens when correlated assets disagree. <br><br><b>Bearish Divergence:</b> Asset A (e.g., NQ) makes a Higher High, but Asset B (e.g., ES) makes a Lower High. This shows weakness. <br><b>Bullish Divergence:</b> Asset A makes a Lower Low, but Asset B makes a Higher Low. This shows hidden strength.",
-                question: "Asset A makes a Higher High, Asset B makes a Lower High. What is this?",
-                a: "Bullish Continuation",
-                b: "Bearish Divergence (Reversal)",
-                correct: "B",
-                explanation: "Correct! Disagreement between assets often precedes a reversal."
+                title: "2. Liquidity: The Fuel",
+                body: "Why does price move? It seeks <b>Liquidity</b>. <br><br>Liquidity is just a fancy word for 'Orders'. Big institutions need to buy huge amounts, so they drive price to where lots of people have their Stop Losses (which are sell orders). <br><br>Common Liquidity Zones: <br>- <b>Asia Highs/Lows:</b> The high and low price reached during the Asian session (overnight). <br>- <b>Data Wicks:</b> Wicks created by news events (CPI, NFP).",
+                question: "Why does price often target the Asia Highs or Lows?",
+                a: "Because there is a lot of liquidity (Stop Losses) there.",
+                b: "Because it's a random movement.",
+                correct: "A",
+                explanation: "Correct! The market seeks these areas to fill large institutional orders."
             },
             {
-                title: "3. Deviation Levels (-4)",
-                body: "Price doesn't move randomly; it moves in standard deviations. We use a tool to map these 'Red Levels': <b>-2, -2.5, and -4</b>. <br><br> These are extreme zones where price is statistically likely to snap back (Mean Reversion). <br><br>If price hits a -4 Deviation Level AND shows a Divergence, it is a high-confidence reversal trade.",
-                question: "Which Deviation Levels are considered key 'Reversal Zones'?",
-                a: "Levels 1 and 2",
-                b: "Levels -2, -2.5, and -4",
+                title: "3. Strategy: The Asia Sweep",
+                body: "Now we can learn a strategy. <br><br><b>Step 1:</b> Identify the High and Low of the Asian Session. <br><b>Step 2:</b> Wait for the London Session (8am - 10am). <br><b>Step 3:</b> Watch for a 'Sweep'. This is when price breaks the High/Low but then CLOSES back inside the range. This is a fake-out! <br><br><b>Step 4:</b> Enter a reversal trade targeting the opposite side.",
+                question: "For a valid Asia Sweep, what must the candle do after breaking the level?",
+                a: "Keep going in that direction.",
+                b: "Close back inside the range (Fakeout).",
                 correct: "B",
-                explanation: "Correct! These are the statistical extremes where reversals happen."
+                explanation: "Correct! The 'Close back inside' confirms it was just a liquidity grab, not a breakout."
             },
             {
-                title: "4. Golden Rules: Risk & Timing",
-                body: "<b>1. Best Days:</b> Tuesday, Wednesday, and Thursday. Mondays and Fridays are often choppy. <br><b>2. Preservation:</b> Your #1 job is to not lose your account. <br><b>3. Stop Losses:</b> Never trade without one. It stops a scratch from becoming a gash.",
-                question: "Which days are generally considered the 'Best' for trading?",
-                a: "Monday & Friday",
-                b: "Tuesday, Wednesday, Thursday",
+                title: "4. Strategy: Divergences",
+                body: "A Divergence is a crack in the market's armor. We look at two correlated assets, like <b>NQ (Tech Stocks)</b> and <b>ES (S&P 500)</b>. They should move together. <br><br><b>Bearish Divergence:</b> NQ makes a Higher High, but ES makes a Lower High. This shows weakness (one is failing to keep up). <br><b>Bullish Divergence:</b> NQ makes a Lower Low, but ES makes a Higher Low. This shows hidden strength.",
+                question: "NQ makes a Higher High, but ES makes a Lower High. What is this?",
+                a: "Bearish Divergence (Reversal Signal)",
+                b: "Bullish Continuation",
+                correct: "A",
+                explanation: "Correct! Disagreement between correlated assets often precedes a reversal."
+            },
+            {
+                title: "5. Risk: Survival Rules",
+                body: "You cannot trade if you lose all your money. Preservation is #1. <br><br><b>Rule 1: Stop Losses.</b> Never trade without one. It stops a scratch from becoming a gash. <br><b>Rule 2: Position Sizing.</b> For a small account (e.g., $100), use the smallest size possible (0.01 lots). <br><b>Rule 3: Timing.</b> The best days to trade are Tuesday, Wednesday, and Thursday. Mondays and Fridays are often choppy.",
+                question: "What is the primary goal of a trader?",
+                a: "To make a million dollars quickly.",
+                b: "To protect capital (Preservation).",
                 correct: "B",
-                explanation: "Correct! Mid-week usually offers the cleanest price action."
+                explanation: "Correct! If you survive, you can thrive. Protect your downside first."
             }
         ];
 
