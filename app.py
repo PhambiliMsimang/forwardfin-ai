@@ -25,8 +25,8 @@ GLOBAL_MEMORY = {
         "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "valid": False}
     },
     "history": [],
-    "performance": {"wins": 0, "total": 0, "win_rate": 0}, # NEW: Session Tracker
-    "active_trades": [], # NEW: List to store open 'paper' trades
+    "performance": {"wins": 0, "total": 0, "win_rate": 0}, # Session Scoreboard
+    "active_trades": [], # Open paper trades
     "last_alert_time": 0
 }
 
@@ -36,6 +36,7 @@ analyzer = SentimentIntensityAnalyzer()
 
 # --- 🔔 DISCORD ALERT SYSTEM ---
 def send_discord_alert(data):
+    # Prevent spam (15 min cooldown)
     if time.time() - GLOBAL_MEMORY["last_alert_time"] < 900: return
 
     try:
@@ -132,7 +133,6 @@ def run_fundamental_brain():
                 prob = min(max(int(prob), 10), 95)
                 trade_setup = {"entry": current_price, "tp": tp, "sl": sl, "valid": bias != "NEUTRAL"}
                 
-                # Narrative
                 sentiment_desc = "POSITIVE" if avg_sentiment > 0.05 else ("NEGATIVE" if avg_sentiment < -0.05 else "NEUTRAL")
                 narrative = (
                     f"Market is {bias}. Fundamentals are {sentiment_desc} (Score: {avg_sentiment:.2f}) driven by top story: '{top_story}'. "
@@ -146,11 +146,10 @@ def run_fundamental_brain():
                     "trade_setup": trade_setup
                 }
 
-                # --- 3. TRADE MANAGEMENT & GRADING (NEW) ---
+                # --- 3. TRADE MANAGEMENT (Updated for 70% Rule) ---
                 
-                # A. Open a new 'Paper Trade' if confidence is high
-                if prob > 75 and bias != "NEUTRAL":
-                    # Only open if we haven't recently
+                # A. Open 'Paper Trade' ONLY if Confidence >= 70%
+                if prob >= 70 and bias != "NEUTRAL":
                     if not any(t for t in GLOBAL_MEMORY["active_trades"] if time.time() - t['time'] < 300):
                         GLOBAL_MEMORY["active_trades"].append({
                             "type": bias,
@@ -160,31 +159,27 @@ def run_fundamental_brain():
                         send_discord_alert(GLOBAL_MEMORY["prediction"])
 
                 # B. Grade old trades (Check 5 mins later)
-                # We iterate backwards to safely remove items
                 for trade in GLOBAL_MEMORY["active_trades"][:]:
                     if time.time() - trade['time'] > 300: # 5 minutes passed
                         is_win = False
                         if trade['type'] == "BULLISH" and current_price > trade['entry']: is_win = True
                         if trade['type'] == "BEARISH" and current_price < trade['entry']: is_win = True
                         
-                        # Update Scoreboard
                         GLOBAL_MEMORY["performance"]["total"] += 1
                         if is_win: GLOBAL_MEMORY["performance"]["wins"] += 1
                         
-                        # Calculate Rate
                         wins = GLOBAL_MEMORY["performance"]["wins"]
                         total = GLOBAL_MEMORY["performance"]["total"]
                         GLOBAL_MEMORY["performance"]["win_rate"] = int((wins / total) * 100) if total > 0 else 0
                         
-                        # Remove graded trade
                         GLOBAL_MEMORY["active_trades"].remove(trade)
-                        print(f"⚖️ TRADE GRADED: {trade['type']} at ${trade['entry']} vs ${current_price}. Win? {is_win}", flush=True)
+                        print(f"⚖️ TRADE GRADED: {trade['type']} Win? {is_win}", flush=True)
 
         except Exception as e:
             print(f"❌ Brain Error: {e}", flush=True)
         time.sleep(10)
 
-# --- WORKER 3: THE RICH WEBSITE (With Active Win Rate) ---
+# --- WORKER 3: THE RICH WEBSITE (Academy + Win Rate) ---
 @app.get("/")
 async def root():
     return HTMLResponse("""
