@@ -25,6 +25,8 @@ GLOBAL_MEMORY = {
         "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "valid": False}
     },
     "history": [],
+    "performance": {"wins": 0, "total": 0, "win_rate": 0}, # NEW: Session Tracker
+    "active_trades": [], # NEW: List to store open 'paper' trades
     "last_alert_time": 0
 }
 
@@ -74,7 +76,7 @@ def run_real_data_stream():
             print(f"⚠️ Data Error: {e}", flush=True)
         time.sleep(3)
 
-# --- WORKER 2: AI BRAIN & TRADE ARCHITECT ---
+# --- WORKER 2: AI BRAIN & SELF-GRADING ENGINE ---
 def run_fundamental_brain():
     print("🧠 BRAIN THREAD: Starting...", flush=True)
     while True:
@@ -97,48 +99,44 @@ def run_fundamental_brain():
             prices = GLOBAL_MEMORY["history"]
             if len(prices) > 20:
                 series = pd.Series(prices)
-                delta = series.diff()
+                current_price = prices[-1]
                 
-                # RSI Calculation
+                # RSI & Volatility
+                delta = series.diff()
                 gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
                 loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
                 rs = gain / loss
                 rsi = 100 - (100 / (1 + rs))
                 rsi_val = rsi.iloc[-1] if not pd.isna(rsi.iloc[-1]) else 50
-                
-                # Volatility
                 volatility = series.rolling(20).std().iloc[-1]
                 if pd.isna(volatility) or volatility == 0: volatility = 50.0 
 
                 # Decision Logic
                 bias = "NEUTRAL"
                 prob = 50
-                entry = prices[-1]
                 
                 if rsi_val < 40 and avg_sentiment > -0.1:
                     bias = "BULLISH"
                     prob = 78 + (avg_sentiment * 10)
-                    tp = entry + (3 * volatility)
-                    sl = entry - (1.5 * volatility)
-                
+                    tp = current_price + (3 * volatility)
+                    sl = current_price - (1.5 * volatility)
                 elif rsi_val > 60 and avg_sentiment < 0.1:
                     bias = "BEARISH"
                     prob = 78 - (avg_sentiment * 10)
-                    tp = entry - (3 * volatility)
-                    sl = entry + (1.5 * volatility)
-                
+                    tp = current_price - (3 * volatility)
+                    sl = current_price + (1.5 * volatility)
                 else:
-                    tp = entry * 1.01
-                    sl = entry * 0.99
+                    tp = current_price * 1.01
+                    sl = current_price * 0.99
 
                 prob = min(max(int(prob), 10), 95)
-                trade_setup = {"entry": entry, "tp": tp, "sl": sl, "valid": bias != "NEUTRAL"}
+                trade_setup = {"entry": current_price, "tp": tp, "sl": sl, "valid": bias != "NEUTRAL"}
                 
+                # Narrative
                 sentiment_desc = "POSITIVE" if avg_sentiment > 0.05 else ("NEGATIVE" if avg_sentiment < -0.05 else "NEUTRAL")
-                
                 narrative = (
                     f"Market is {bias}. Fundamentals are {sentiment_desc} (Score: {avg_sentiment:.2f}) driven by top story: '{top_story}'. "
-                    f"Technicals show RSI at {rsi_val:.1f}. Volatility-adjusted stops applied."
+                    f"Technicals show RSI at {rsi_val:.1f}. Stops adjusted for volatility (${volatility:.2f})."
                 )
 
                 GLOBAL_MEMORY["prediction"] = {
@@ -148,14 +146,45 @@ def run_fundamental_brain():
                     "trade_setup": trade_setup
                 }
 
+                # --- 3. TRADE MANAGEMENT & GRADING (NEW) ---
+                
+                # A. Open a new 'Paper Trade' if confidence is high
                 if prob > 75 and bias != "NEUTRAL":
-                    send_discord_alert(GLOBAL_MEMORY["prediction"])
+                    # Only open if we haven't recently
+                    if not any(t for t in GLOBAL_MEMORY["active_trades"] if time.time() - t['time'] < 300):
+                        GLOBAL_MEMORY["active_trades"].append({
+                            "type": bias,
+                            "entry": current_price,
+                            "time": time.time()
+                        })
+                        send_discord_alert(GLOBAL_MEMORY["prediction"])
+
+                # B. Grade old trades (Check 5 mins later)
+                # We iterate backwards to safely remove items
+                for trade in GLOBAL_MEMORY["active_trades"][:]:
+                    if time.time() - trade['time'] > 300: # 5 minutes passed
+                        is_win = False
+                        if trade['type'] == "BULLISH" and current_price > trade['entry']: is_win = True
+                        if trade['type'] == "BEARISH" and current_price < trade['entry']: is_win = True
+                        
+                        # Update Scoreboard
+                        GLOBAL_MEMORY["performance"]["total"] += 1
+                        if is_win: GLOBAL_MEMORY["performance"]["wins"] += 1
+                        
+                        # Calculate Rate
+                        wins = GLOBAL_MEMORY["performance"]["wins"]
+                        total = GLOBAL_MEMORY["performance"]["total"]
+                        GLOBAL_MEMORY["performance"]["win_rate"] = int((wins / total) * 100) if total > 0 else 0
+                        
+                        # Remove graded trade
+                        GLOBAL_MEMORY["active_trades"].remove(trade)
+                        print(f"⚖️ TRADE GRADED: {trade['type']} at ${trade['entry']} vs ${current_price}. Win? {is_win}", flush=True)
 
         except Exception as e:
             print(f"❌ Brain Error: {e}", flush=True)
         time.sleep(10)
 
-# --- WORKER 3: THE RICH WEBSITE (Academy V2) ---
+# --- WORKER 3: THE RICH WEBSITE (With Active Win Rate) ---
 @app.get("/")
 async def root():
     return HTMLResponse("""
@@ -181,7 +210,6 @@ async def root():
         .lesson-card { cursor: pointer; transition: all 0.2s; border-left: 4px solid transparent; }
         .lesson-card:hover { background: #f1f5f9; }
         .lesson-card.active { background: #e0f2fe; border-left-color: #0284c7; }
-        .stat-box { background: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800 antialiased flex flex-col min-h-screen">
@@ -502,6 +530,26 @@ async def root():
                 else riskText.innerText = "LOW";
             }
 
+            // NEW: UPDATE WIN RATE
+            const winRateEl = document.getElementById('win-rate');
+            const winBarEl = document.getElementById('win-bar');
+            const tradesEl = document.getElementById('total-trades');
+            
+            if (winRateEl && data.performance) {
+                const wr = data.performance.win_rate;
+                const total = data.performance.total;
+                
+                winRateEl.innerText = wr + "%";
+                winBarEl.style.width = wr + "%";
+                winBarEl.className = (wr >= 50) ? "bg-emerald-500 h-full transition-all duration-1000" : "bg-rose-500 h-full transition-all duration-1000";
+                
+                if (total === 0) {
+                    tradesEl.innerText = "Calibrating (No trades yet)...";
+                } else {
+                    tradesEl.innerText = `${total} Paper Trades Validated`;
+                }
+            }
+
             const setup = data.prediction.trade_setup;
             const validEl = document.getElementById('setup-validity');
             if (setup && setup.valid) {
@@ -537,7 +585,7 @@ async def root():
             }
         });
 
-        // --- 3. ACADEMY LOGIC (BEGINNER FRIENDLY) ---
+        // --- 3. ACADEMY LOGIC ---
         const lessons = [
             {
                 title: "1. Basics: Structure & Candles",
