@@ -304,6 +304,20 @@ async def root():
             </div>
         </section>
 
+        <section class="py-10 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+            <div class="bg-slate-900 rounded-2xl shadow-2xl border border-slate-800 overflow-hidden">
+                <div class="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 backdrop-blur">
+                    <h3 class="font-bold text-white flex items-center gap-2"><span>📈</span> Live Market Action</h3>
+                    <span class="text-xs text-slate-500 font-mono">SOURCE: TRADINGVIEW</span>
+                </div>
+                <div class="h-[500px] w-full" id="tradingview_chart"></div>
+                <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+                <script type="text/javascript">
+                new TradingView.widget({ "autosize": true, "symbol": "CME:NQ1!", "interval": "1", "timezone": "Etc/UTC", "theme": "dark", "style": "1", "locale": "en", "toolbar_bg": "#f1f3f6", "enable_publishing": false, "hide_side_toolbar": false, "allow_symbol_change": true, "container_id": "tradingview_chart", "studies": ["BB@tv-basicstudies"] });
+                </script>
+            </div>
+        </section>
+
         <section id="simulation" class="py-10 bg-slate-900 text-white">
             <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -520,7 +534,7 @@ async def root():
     </script>
 </body>
 </html>
-    """)
+                        """)  
 
 if __name__ == "__main__":
     t1 = threading.Thread(target=run_market_data_stream, daemon=True)
