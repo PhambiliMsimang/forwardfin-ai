@@ -162,7 +162,7 @@ def run_strategy_engine():
                     narrative += " (Sniper Mode: Waiting for A+ Setup)"
                 else:
                     prob += 10 # Boost confidence if criteria met
-                    narrative = "🎯 SNIPER ENTRY: " + narrative
+                    narrative = " SNIPER ENTRY: " + narrative
 
             # --- RISK MANAGEMENT ---
             # Volatility (ATR-ish)
@@ -313,7 +313,7 @@ async def root():
                 <div class="h-[500px] w-full" id="tradingview_chart"></div>
                 <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
                 <script type="text/javascript">
-                new TradingView.widget({ "autosize": true, "symbol": "CME:NQ1!", "interval": "1", "timezone": "Etc/UTC", "theme": "dark", "style": "1", "locale": "en", "toolbar_bg": "#f1f3f6", "enable_publishing": false, "hide_side_toolbar": false, "allow_symbol_change": true, "container_id": "tradingview_chart", "studies": ["BB@tv-basicstudies"] });
+                new TradingView.widget({ "autosize": true, "symbol": "CAPITALCOM:US100", "interval": "1", "timezone": "Etc/UTC", "theme": "dark", "style": "1", "locale": "en", "toolbar_bg": "#f1f3f6", "enable_publishing": false, "hide_side_toolbar": false, "allow_symbol_change": true, "container_id": "tradingview_chart", "studies": ["BB@tv-basicstudies"] });
                 </script>
             </div>
         </section>
