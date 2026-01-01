@@ -57,7 +57,7 @@ def send_discord_alert(data, asset):
 
     try:
         color = 5763719 if data['bias'] == "LONG" else 15548997
-        strategy_name = "Asia Sweep + IFVG"
+        strategy_name = GLOBAL_STATE['settings']['strategy']
         style_icon = "🔫" if GLOBAL_STATE['settings']['style'] == "SNIPER" else "⚡"
         
         embed = {
@@ -69,7 +69,7 @@ def send_discord_alert(data, asset):
                 {"name": "🎯 TP", "value": f"${data['trade_setup']['tp']:,.2f}", "inline": True},
                 {"name": "🛑 SL", "value": f"${data['trade_setup']['sl']:,.2f}", "inline": True}
             ],
-            "footer": {"text": "ForwardFin V2 • IFVG Validated"}
+            "footer": {"text": f"ForwardFin V2 • {strategy_name}"}
         }
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
         GLOBAL_STATE["last_alert_time"] = time.time()
@@ -177,8 +177,12 @@ def run_strategy_engine():
             volatility = pd.Series(history).diff().std() * 2
             if pd.isna(volatility) or volatility == 0: volatility = 10.0
             
-            tp_mult = 4.0 if style == "SNIPER" else 2.0
-            sl_mult = 0.5 if style == "SNIPER" else 1.0
+            if style == "SCALP":
+                tp_mult, sl_mult = 1.5, 1.0
+            elif style == "SWING":
+                tp_mult, sl_mult = 3.0, 2.0
+            else: # SNIPER
+                tp_mult, sl_mult = 4.0, 0.5
 
             if bias == "LONG":
                 tp = current_price + (volatility * tp_mult)
@@ -256,6 +260,7 @@ async def root():
         .btn-asset { transition: all 0.2s; border: 1px solid #e2e8f0; }
         .btn-asset:hover { background-color: #f1f5f9; border-color: #0284c7; }
         .btn-asset.active { background-color: #0284c7; color: white; border-color: #0284c7; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        select { background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e"); background-position: right 0.5rem center; background-repeat: no-repeat; background-size: 1.5em 1.5em; padding-right: 2.5rem; -webkit-print-color-adjust: exact; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800 antialiased flex flex-col min-h-screen">
@@ -280,25 +285,24 @@ async def root():
     </nav>
 
     <main class="flex-grow">
-        <section id="overview" class="pt-20 pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+        <section id="overview" class="pt-20 pb-10 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-10">
                 <div class="space-y-6">
                     <div class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold uppercase tracking-wide">
-                        V2.1 LIVE: IFVG SNIPER ACTIVE
+                        V2.1 LIVE: IFVG ENGINE ACTIVE
                     </div>
                     <h1 class="text-4xl sm:text-5xl font-extrabold text-slate-900 leading-tight">
                         Institutional Logic,<br>
-                        <span class="text-sky-600">Simplified.</span>
+                        <span class="text-sky-600">Your Terms.</span>
                     </h1>
                     <p class="text-lg text-slate-600 max-w-lg">
-                        ForwardFin V2 now filters every trade through an <strong>Inversion Fair Value Gap (IFVG)</strong> engine to prevent false breakouts.
+                        Select your asset, strategy, and risk profile below. ForwardFin waits for the perfect <strong>IFVG</strong> confirmation.
                     </p>
                 </div>
                 <div class="grid grid-cols-3 gap-4">
                     <div class="bg-white p-4 rounded-2xl shadow-lg border border-slate-100 flex flex-col items-center">
                         <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">IFVG Status</h3>
                         <div id="status-ifvg" class="text-xl font-black text-rose-500 mt-4">NO GAP</div>
-                        <p class="text-xs text-slate-400 mt-2">Waiting for Break</p>
                     </div>
                     <div class="bg-white p-4 rounded-2xl shadow-lg border border-slate-100 flex flex-col items-center">
                         <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Confidence</h3>
@@ -312,19 +316,33 @@ async def root():
                     </div>
                 </div>
             </div>
+
+            <div class="bg-white p-6 rounded-2xl shadow-lg border border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Strategy Logic</label>
+                    <select id="sel-strategy" onchange="pushSettings()" class="w-full mt-2 bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-sky-500 focus:border-sky-500 block p-2.5">
+                        <option value="SWEEP" selected>Asia Liquidity Sweep</option>
+                        <option value="STD_DEV">Standard Deviation (Reversion)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Trade Style</label>
+                    <select id="sel-style" onchange="pushSettings()" class="w-full mt-2 bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-sky-500 focus:border-sky-500 block p-2.5">
+                        <option value="SNIPER" selected>🎯 Sniper (High Precision)</option>
+                        <option value="SCALP">⚡ Scalp (Quick)</option>
+                        <option value="SWING">🌊 Swing (Hold)</option>
+                    </select>
+                </div>
+            </div>
         </section>
 
-        <section class="py-10 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+        <section class="py-4 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
             <div class="bg-slate-900 rounded-2xl shadow-2xl border border-slate-800 overflow-hidden">
                 <div class="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 backdrop-blur">
                     <h3 class="font-bold text-white flex items-center gap-2"><span>📈</span> Institutional Price Action</h3>
                     <span class="text-xs text-slate-500 font-mono">SOURCE: CAPITAL.COM</span>
                 </div>
                 <div class="h-[500px] w-full" id="tradingview_chart"></div>
-                <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-                <script type="text/javascript">
-                     // Initial Load
-                </script>
             </div>
         </section>
 
@@ -336,8 +354,8 @@ async def root():
                 </div>
                 <div class="bg-slate-800 rounded-2xl shadow-2xl overflow-hidden relative min-h-[400px] flex flex-col border border-slate-700">
                     <div class="p-4 border-b border-slate-700 bg-slate-800/50 flex justify-between items-center">
-                        <div class="font-mono text-sky-400">TARGET: <span id="lbl-asset">NQ1!</span> (Live)</div>
-                        <div class="text-xs text-slate-500">MODE: SNIPER</div>
+                        <div class="font-mono text-sky-400">TARGET: <span id="lbl-asset">NQ1!</span></div>
+                        <div class="text-xs text-slate-500">LIVE ANALYSIS</div>
                     </div>
                     <div class="flex-grow p-8 relative">
                         <div id="sim-results" class="h-full flex flex-col md:flex-row gap-6">
@@ -363,7 +381,7 @@ async def root():
                             <div class="w-full md:w-2/3 flex flex-col gap-4">
                                 <div class="bg-slate-700/30 rounded-lg border border-slate-600 p-4">
                                     <div class="flex justify-between items-center mb-3">
-                                        <h4 class="text-xs font-bold text-sky-400 uppercase">Suggested Trade Setup (4:1 Reward)</h4>
+                                        <h4 class="text-xs font-bold text-sky-400 uppercase">Suggested Trade Setup</h4>
                                         <span id="setup-validity" class="text-[10px] bg-slate-700 px-2 py-1 rounded">WAITING</span>
                                     </div>
                                     <div class="grid grid-cols-3 gap-3 text-center">
@@ -400,7 +418,6 @@ async def root():
                     <h2 class="text-3xl font-bold text-slate-900">ForwardFin Academy</h2>
                     <p class="mt-4 text-slate-600 max-w-2xl mx-auto">V2.1 Concepts: IFVG & Sweeps.</p>
                 </div>
-                
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[400px]">
                     <div class="lg:col-span-4 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden overflow-y-auto">
                         <div onclick="loadLesson(0)" class="lesson-card p-4 border-b border-slate-200 active">
@@ -416,7 +433,6 @@ async def root():
                             <p class="text-xs text-slate-500 mt-1">Risk management for V2.</p>
                         </div>
                     </div>
-
                     <div class="lg:col-span-8 bg-white border border-slate-200 rounded-xl p-8 flex flex-col shadow-sm">
                         <h3 id="lesson-title" class="text-2xl font-bold text-sky-600 mb-4">Select a Lesson</h3>
                         <div id="lesson-body" class="text-slate-600 leading-relaxed mb-8 flex-grow overflow-y-auto">
@@ -472,6 +488,7 @@ async def root():
         <div class="text-xs text-slate-600">&copy; 2026 ForwardFin. All rights reserved.</div>
     </footer>
 
+    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script>
         // --- 1. ARCHITECTURE INTERACTIVITY ---
         const architectureData = [
@@ -511,13 +528,18 @@ async def root():
             document.getElementById('btn-nq').className = asset === "NQ1!" ? "btn-asset active px-4 py-1.5 rounded text-sm font-bold bg-white text-slate-600" : "btn-asset px-4 py-1.5 rounded text-sm font-bold bg-white text-slate-600";
             document.getElementById('btn-es').className = asset === "ES1!" ? "btn-asset active px-4 py-1.5 rounded text-sm font-bold bg-white text-slate-600" : "btn-asset px-4 py-1.5 rounded text-sm font-bold bg-white text-slate-600";
             document.getElementById('lbl-asset').innerText = asset;
+            pushSettings(); // Send asset change with current dropdowns
+            initChart(asset);
+        }
 
+        async function pushSettings() {
+             const strategy = document.getElementById('sel-strategy').value;
+             const style = document.getElementById('sel-style').value;
              await fetch('/api/update-settings', {
                 method: 'POST', 
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ asset: asset, strategy: "SWEEP", style: "SNIPER" })
+                body: JSON.stringify({ asset: currentAsset, strategy: strategy, style: style })
             });
-            initChart(asset);
         }
 
         let heroChart = null;
@@ -619,7 +641,7 @@ async def root():
     </script>
 </body>
 </html>
-""")
+                        """)
 
 if __name__ == "__main__":
     t1 = threading.Thread(target=run_market_data_stream, daemon=True)
