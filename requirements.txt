@@ -1,6 +1,7 @@
 fastapi
 uvicorn
-pandas
-pytz
-yfinance
 requests
+pandas
+numpy
+vaderSentiment
+yfinance
