@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 # --- 🔧 CONFIGURATION ---
 DISCORD_WEBHOOK_URL = "https://discordapp.com/api/webhooks/1454098742218330307/gi8wvEn0pMcNsAWIR_kY5-_0_VE4CvsgWjkSXjCasXX-xUrydbhYtxHRLLLgiKxs_pLL"
-ASIA_OPEN_TIME = dtime(3, 0)   # 03:00
+ASIA_OPEN_TIME = dtime(3, 0)   # 03:00 (Server/Exchange Time)
 ASIA_CLOSE_TIME = dtime(8, 59) # 08:59
 
 # --- 🧠 GLOBAL STATE ---
@@ -129,6 +129,7 @@ def get_asia_session_data(df):
     session_data = df.loc[mask]
     if session_data.empty: return None
 
+    # Using Consolidated Rule (Whole Session) as baseline anchor
     return {
         "high": float(session_data['High'].max()),
         "low": float(session_data['Low'].min()),
@@ -144,6 +145,7 @@ def resample_to_5m(df):
         'Close': 'last',
         'Volume': 'sum'
     }
+    # Resample and drop incomplete bars
     df_5m = df.resample('5min').apply(ohlc_dict).dropna()
     return df_5m
 
@@ -156,30 +158,29 @@ def detect_1m_trigger(df, trend_bias):
     """
     if len(df) < 5: return False
     
-    last_candle = df.iloc[-1]
-    prev_candle = df.iloc[-2]
-    
     # Simple FVG Detection (1m)
-    # Bullish FVG: Low of candle i > High of candle i+2 (conceptually, checking gap)
-    # Simplified for real-time: Checking gap between last close and previous ranges
     
     is_fvg = False
     is_bos = False
     
+    # Look at the last 3 closed candles
+    last_c = df.iloc[-2] # Last completed candle
+    prev_c = df.iloc[-3]
+    
     if trend_bias == "LONG":
-        # Bullish FVG pattern check
-        if df['Low'].iloc[-1] > df['High'].iloc[-3]: 
+        # Bullish FVG pattern check (Low of recent > High of 2 back)
+        if df['Low'].iloc[-2] > df['High'].iloc[-4]: 
             is_fvg = True
-        # BOS: Close above previous swing high
-        if df['Close'].iloc[-1] > df['High'].iloc[-2]: 
+        # BOS: Close above previous swing high (simplified as recent local high)
+        if df['Close'].iloc[-1] > df['High'].iloc[-3]: 
             is_bos = True
             
     elif trend_bias == "SHORT":
         # Bearish FVG pattern check
-        if df['High'].iloc[-1] < df['Low'].iloc[-3]: 
+        if df['High'].iloc[-2] < df['Low'].iloc[-4]: 
             is_fvg = True
         # BOS: Close below previous swing low
-        if df['Close'].iloc[-1] < df['Low'].iloc[-2]: 
+        if df['Close'].iloc[-1] < df['Low'].iloc[-3]: 
             is_bos = True
             
     return is_fvg and is_bos
@@ -189,10 +190,10 @@ def get_recent_5m_swing(df_5m, bias):
     """Finds the most recent 5m swing high or low for TP1."""
     if len(df_5m) < 10: return 0
     if bias == "LONG":
-        # Target recent swing High
+        # Target recent swing High (resistance)
         return float(df_5m['High'].iloc[-10:].max())
     else:
-        # Target recent swing Low
+        # Target recent swing Low (support)
         return float(df_5m['Low'].iloc[-10:].min())
 
 # --- WORKER 2: THE STRATEGY BRAIN ---
@@ -228,22 +229,18 @@ def run_strategy_engine():
                     leg_range = high - low
                     
                     # TARGETS (STDV Projections)
-                    # We are looking for price to be at -2.0 STDV or lower to activate "Execution Mode"
                     
                     # SCENARIO A: Asia LOW Swept -> Bullish
                     if current_price < low:
-                        stdv_2 = low - (leg_range * 1.0) # -2.0 STDV level
-                        stdv_4 = low - (leg_range * 3.0) # -4.0 STDV level
+                        stdv_2 = low - (leg_range * 1.0) # -2.0 STDV level (Range * 1 projected down)
                         
                         narrative = "⚠️ Asia Low Swept. Monitoring for -2.0 STDV impact."
                         
                         # EXECUTION TRIGGER: Are we in the "Kill Zone"?
-                        # PDF Rule: Trigger only if Price hits -2.0 to -4.0 STDV
                         if current_price <= (stdv_2 * 1.001): # Within tolerance or below -2.0
                             narrative = "🚨 ZONE ACTIVATED: Price at -2.0 STDV. Hunting 1m Confirmation..."
                             
                             # --- PHASE 2: EXECUTION MODE (1m) ---
-                            # PDF Rule: Check for 1m BOS + FVG
                             has_trigger = detect_1m_trigger(df, "LONG")
                             
                             if has_trigger:
@@ -251,10 +248,10 @@ def run_strategy_engine():
                                 prob = 90
                                 
                                 # Dynamic Targets
-                                tp1 = get_recent_5m_swing(df_5m, "LONG")
-                                tp2 = high # Asia High (Origin)
+                                tp1 = get_recent_5m_swing(df_5m, "LONG") # TP1: 5m Swing
+                                tp2 = high # TP2: Asia High (Origin)
                                 
-                                # Dynamic Stop (Recent 1m Low)
+                                # Dynamic Stop (Recent 1m Low below entry candle)
                                 sl_dynamic = float(df['Low'].iloc[-5:].min())
                                 
                                 narrative = (
@@ -271,8 +268,7 @@ def run_strategy_engine():
 
                     # SCENARIO B: Asia HIGH Swept -> Bearish
                     elif current_price > high:
-                        stdv_2 = high + (leg_range * 1.0)
-                        stdv_4 = high + (leg_range * 3.0)
+                        stdv_2 = high + (leg_range * 1.0) # -2.0 STDV level projected up
                         
                         narrative = "⚠️ Asia High Swept. Monitoring for -2.0 STDV impact."
                         
@@ -328,7 +324,7 @@ def run_strategy_engine():
                     })
                     send_discord_alert(GLOBAL_STATE["prediction"], settings["asset"])
 
-            # Grading (No changes needed here)
+            # Grading
             for trade in GLOBAL_STATE["active_trades"][:]:
                 if time.time() - trade['time'] > 300:
                     is_win = (trade['type'] == "LONG" and current_price > trade['entry']) or \
@@ -620,7 +616,7 @@ async def root():
         function initChart(symbol) {
             const tvSymbol = symbol === "NQ1!" ? "CAPITALCOM:US100" : "CAPITALCOM:US500";
             if(widget) { widget = null; document.getElementById('tradingview_chart').innerHTML = ""; }
-            widget = new TradingView.widget({ "autosize": true, "symbol": tvSymbol, "interval": "1", "timezone": "Etc/UTC", "theme": "dark", "style": "1", "locale": "en", "toolbar_bg": "#f1f3f6", "enable_publishing": false, "hide_side_toolbar": false, "allow_symbol_change": false, "container_id": "tradingview_chart" });
+            widget = new TradingView.widget({ "autosize": true, "symbol": tvSymbol, "interval": "1", "timezone": "Africa/Johannesburg", "theme": "dark", "style": "1", "locale": "en", "toolbar_bg": "#f1f3f6", "enable_publishing": false, "hide_side_toolbar": false, "allow_symbol_change": false, "container_id": "tradingview_chart" });
         }
 
         async function setAsset(asset) {
@@ -758,7 +754,7 @@ async def root():
     </script>
 </body>
 </html>
-                        """)
+""")
 
 if __name__ == "__main__":
     t1 = threading.Thread(target=run_market_data_stream, daemon=True)
