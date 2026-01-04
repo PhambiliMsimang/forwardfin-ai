@@ -1,91 +1,44 @@
-🦁 ForwardFin V3.0 | Asia Session Protocol
-ForwardFin V3.0 is an automated market analysis engine designed to trade institutional liquidity sweeps. It abandons lagging indicators (RSI, MACD) in favor of time-based price action protocols and Fibonacci Standard Deviation projections.
+# ForwardFin: AI-Powered JSE Trading Assistant
 
-⚡ Core Philosophy
-The bot operates on the "Asia Manipulation" thesis:
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Status](https://img.shields.io/badge/status-MVP-orange)
 
-Accumulation: The market builds liquidity between 03:00 and 08:59 (Exchange Time).
+## 🚀 Overview
+**ForwardFin** is a quantitative finance platform designed specifically for the **Johannesburg Stock Exchange (JSE)**. It leverages machine learning to solve a critical problem for retail investors: separating long-term **dividend yield accumulation** strategies from short-term **swing trading** volatility.
 
-Manipulation: Institutions "sweep" the High or Low of this range after the session close.
+Unlike generic screeners, ForwardFin uses a decoupled microservices architecture to ingest live market data via the **Yahoo Finance API**, process it through a Scikit-Learn predictive model, and visualize actionable insights for the user.
 
-Distribution: Price reverses to target the opposing side of the range or specific STDV levels.
+## ⚡ Key Features
 
-🛠️ Technical Architecture
-ForwardFin runs on a multi-threaded Python architecture:
+* **JSE Market Data Ingestion:** Real-time and historical data fetching for JSE-listed tickers using `yfinance`.
+* **Smart Dividend Filter:** Automated calculation of yield-consistency scores to identify stable, high-yield ETFs and blue-chip stocks.
+* **AI Swing Signal Detector:** A classification model (Scikit-Learn) that analyzes volatility markers (RSI, MACD, Bollinger Bands) to flag short-term entry/exit points.
+* **Strategy Decoupling:** Distinct analytical pipelines for "Hold" vs. "Trade" portfolios to prevent strategy drift.
 
-Worker 1 (Data Stream): Fetches real-time 1-minute OHLC data via yfinance (NQ=F / ES=F).
+## 🏗️ Architecture
 
-Worker 2 (Strategy Engine): Performs time-slicing using Pandas, detects liquidity sweeps, and calculates Fibonacci STDV targets.
+ForwardFin follows a modular architecture to ensure scalability and separation of concerns:
 
-API Layer (FastAPI): serves the React/Tailwind frontend for live monitoring.
+1.  **Data Service (Ingestion Layer):** Handles API rate limiting and raw data normalization from Yahoo Finance.
+2.  **Analysis Engine (Compute Layer):**
+    * *Dividend Module:* Calculates trailing yields and payout ratios.
+    * *Volatility Module:* Computes technical indicators.
+    * *ML Classifier:* Predicts short-term price direction probability.
+3.  **Presentation Layer:** A clean dashboard interface for visualization (currently in development).
 
-Alerting Layer: Pushes "Glass Box" reasoning and trade setups to Discord via Webhooks.
+## 🛠️ Tech Stack
 
-📋 Prerequisites
-Python 3.9+
+* **Language:** Python 3.10+
+* **Data Processing:** Pandas, NumPy
+* **Machine Learning:** Scikit-Learn (Random Forest Classifier)
+* **Market Data:** Yahoo Finance API (`yfinance`)
+* **Visualization:** Matplotlib / Plotly
+* **Version Control:** Git
 
-Internet connection (for Data Streaming & Discord Alerts)
+## 📦 Installation & Usage
 
-🚀 Installation
-Clone or Download the Repository
-
-Bash
-
-git clone https://github.com/yourusername/ForwardFin.git
-cd ForwardFin
-Install Dependencies
-
-Bash
-
-pip install fastapi uvicorn requests pandas numpy yfinance vaderSentiment
-Configure Discord
-
-Open main.py.
-
-Replace the DISCORD_WEBHOOK_URL variable with your own channel's webhook URL.
-
-💻 Usage
-Start the Engine:
-
-Bash
-
-python main.py
-Access the Dashboard:
-
-Open your browser and navigate to: http://localhost:10000
-
-Live Dashboard: View real-time price, current bias, and win rates.
-
-Settings: Toggle between NQ (Nasdaq) and ES (S&P 500).
-
-🧠 Strategy Logic (V3.0)
-1. The Accumulation Phase (03:00 - 08:59)
-The bot isolates this specific time window. It calculates the Session High and Session Low. During this time, the status is Waiting.
-
-2. The Trigger (Post-09:00)
-Once the session closes, the bot waits for price to trade outside the established range.
-
-Bullish Signal: Price sweeps below the Asia Low.
-
-Bearish Signal: Price sweeps above the Asia High.
-
-3. The Execution (STDV)
-Upon a confirmed sweep, the bot generates a setup:
-
-Entry: Current Price (at the moment of the sweep).
-
-Take Profit: The opposing side of the Asia Range.
-
-Stop Loss: The -2.0 Standard Deviation level (Expansion Point).
-
-🔔 Discord Alert Example
-When a high-confidence setup (Probability > 85%) is detected, you receive:
-
-🔫 SIGNAL: NQ1! LONG
-
-AI Reasoning: ✅ BULLISH ASIA SWEEP • Session High: 15,420.50 | Low: 15,380.00 • Range Size: 40.50 pts • Logic: Price swept Asia Low. Reversal Expected.
-
-Entry: $15,378.00 🎯 TP: $15,420.50 🛑 SL: $15,339.50 (-2.0 STDV) Confidence: 90%
-
-⚖️ Disclaimer
-This software is for educational and research purposes only. ForwardFin does not guarantee profits. Futures trading involves substantial risk of loss.
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/PhambiliMsimang/forwardfin-ai.git
+   cd ForwardFin
