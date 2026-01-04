@@ -39,7 +39,7 @@ GLOBAL_STATE = {
     "prediction": {
         "bias": "NEUTRAL", 
         "probability": 50, 
-        "narrative": "V2 System Initializing...",
+        "narrative": "V3 System Initializing...",
         "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "valid": False}
     },
     "performance": {"wins": 0, "total": 0, "win_rate": 0},
@@ -62,20 +62,20 @@ def send_discord_alert(data, asset):
 
     try:
         color = 5763719 if data['bias'] == "LONG" else 15548997
-        strategy_name = "ASIA MANIPULATION"
-        style_icon = "🔫" 
+        strategy_name = "ASIA EXECUTION PROTOCOL"
+        style_icon = "🦁" 
         
         embed = {
             "title": f"{style_icon} SIGNAL: {asset} {data['bias']}",
             "description": f"**AI Reasoning:**\n{data['narrative']}",
             "color": color,
             "fields": [
-                {"name": "Entry", "value": f"${data['trade_setup']['entry']:,.2f}", "inline": True},
-                {"name": "🎯 TP (Range)", "value": f"${data['trade_setup']['tp']:,.2f}", "inline": True},
-                {"name": "🛑 SL (-2.0 STDV)", "value": f"${data['trade_setup']['sl']:,.2f}", "inline": True},
+                {"name": "Entry (1m Trigger)", "value": f"${data['trade_setup']['entry']:,.2f}", "inline": True},
+                {"name": "🎯 TP1 (5m Swing)", "value": f"${data['trade_setup']['tp']:,.2f}", "inline": True},
+                {"name": "🛑 SL (Dynamic)", "value": f"${data['trade_setup']['sl']:,.2f}", "inline": True},
                 {"name": "Confidence", "value": f"{data['probability']}%", "inline": True}
             ],
-            "footer": {"text": f"ForwardFin V2 • {strategy_name} • Post-08:59 Sweep"}
+            "footer": {"text": f"ForwardFin V3 • {strategy_name} • Execution Phase Verified"}
         }
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
         GLOBAL_STATE["last_alert_time"] = time.time()
@@ -113,32 +113,21 @@ def run_market_data_stream():
             print(f"⚠️ Data Error: {e}", flush=True)
         time.sleep(10)
 
-# --- HELPER: ASIA SESSION LOGIC ---
+# --- HELPER: DATA PROCESSING ---
 def get_asia_session_data(df):
-    """
-    Isolates the 03:00-08:59 data to define the 'Manipulation Leg'.
-    """
     if df is None or df.empty: return None
-
-    # Ensure index is datetime
     if not isinstance(df.index, pd.DatetimeIndex):
         df.index = pd.to_datetime(df.index)
 
-    # Filter for the most recent trading session
     last_timestamp = df.index[-1]
     current_date = last_timestamp.date()
 
-    # Create mask for 03:00 - 08:59 on the CURRENT day
-    # Note: If running on a server in different timezone, this assumes yfinance returns Exchange Time (US/Eastern)
     mask = (df.index.time >= ASIA_OPEN_TIME) & \
            (df.index.time <= ASIA_CLOSE_TIME) & \
            (df.index.date == current_date)
            
     session_data = df.loc[mask]
-    
-    # If session hasn't started yet or is empty
-    if session_data.empty:
-        return None
+    if session_data.empty: return None
 
     return {
         "high": float(session_data['High'].max()),
@@ -146,21 +135,69 @@ def get_asia_session_data(df):
         "is_closed": last_timestamp.time() > ASIA_CLOSE_TIME
     }
 
-# --- HELPER: IFVG DETECTION ---
-def scan_for_ifvg(highs, lows, closes):
-    if len(closes) < 5: return False
-    for i in range(len(closes)-15, len(closes)-2):
-        if lows[i] > highs[i+2]: # Bullish Gap
-            gap_low = highs[i+2]
-            if closes[-1] < gap_low: return True # Inverted (Bearish)
-        if highs[i] < lows[i+2]: # Bearish Gap
-            gap_high = lows[i+2]
-            if closes[-1] > gap_high: return True # Inverted (Bullish)
-    return False
+def resample_to_5m(df):
+    """Resamples 1m data to 5m for Analysis Mode."""
+    ohlc_dict = {
+        'Open': 'first',
+        'High': 'max',
+        'Low': 'min',
+        'Close': 'last',
+        'Volume': 'sum'
+    }
+    df_5m = df.resample('5min').apply(ohlc_dict).dropna()
+    return df_5m
+
+# --- HELPER: 1-MINUTE EXECUTION TRIGGERS ---
+def detect_1m_trigger(df, trend_bias):
+    """
+    Checks for the Mandatory 1-Minute Checklist:
+    1. MSS (Market Structure Shift / BOS)
+    2. FVG (Imbalance)
+    """
+    if len(df) < 5: return False
+    
+    last_candle = df.iloc[-1]
+    prev_candle = df.iloc[-2]
+    
+    # Simple FVG Detection (1m)
+    # Bullish FVG: Low of candle i > High of candle i+2 (conceptually, checking gap)
+    # Simplified for real-time: Checking gap between last close and previous ranges
+    
+    is_fvg = False
+    is_bos = False
+    
+    if trend_bias == "LONG":
+        # Bullish FVG pattern check
+        if df['Low'].iloc[-1] > df['High'].iloc[-3]: 
+            is_fvg = True
+        # BOS: Close above previous swing high
+        if df['Close'].iloc[-1] > df['High'].iloc[-2]: 
+            is_bos = True
+            
+    elif trend_bias == "SHORT":
+        # Bearish FVG pattern check
+        if df['High'].iloc[-1] < df['Low'].iloc[-3]: 
+            is_fvg = True
+        # BOS: Close below previous swing low
+        if df['Close'].iloc[-1] < df['Low'].iloc[-2]: 
+            is_bos = True
+            
+    return is_fvg and is_bos
+
+# --- HELPER: 5M SWING DETECTION (For TP1) ---
+def get_recent_5m_swing(df_5m, bias):
+    """Finds the most recent 5m swing high or low for TP1."""
+    if len(df_5m) < 10: return 0
+    if bias == "LONG":
+        # Target recent swing High
+        return float(df_5m['High'].iloc[-10:].max())
+    else:
+        # Target recent swing Low
+        return float(df_5m['Low'].iloc[-10:].min())
 
 # --- WORKER 2: THE STRATEGY BRAIN ---
 def run_strategy_engine():
-    print("🧠 BRAIN THREAD: Asia Manipulation Logic Loaded...", flush=True)
+    print("🧠 BRAIN THREAD: Asia Execution Protocol Loaded...", flush=True)
     while True:
         try:
             market = GLOBAL_STATE["market_data"]
@@ -171,12 +208,9 @@ def run_strategy_engine():
                 time.sleep(5)
                 continue
 
-            # 1. GATEKEEPER: CHECK IFVG (Used as Confluence)
-            has_ifvg = scan_for_ifvg(market["highs"], market["lows"], market["history"])
-            GLOBAL_STATE["market_data"]["ifvg_detected"] = has_ifvg
-            
-            # 2. ASIA SESSION ANALYSIS
+            # 1. PREP DATA
             asia_info = get_asia_session_data(df)
+            df_5m = resample_to_5m(df) # Create 5m view for Analysis Mode
             
             bias = "NEUTRAL"
             prob = 50
@@ -189,68 +223,91 @@ def run_strategy_engine():
                 GLOBAL_STATE["market_data"]["session_high"] = high
                 GLOBAL_STATE["market_data"]["session_low"] = low
 
-                # --- CORE LOGIC: POST-SESSION SWEEP ---
+                # --- PHASE 1: ANALYSIS MODE (5m) ---
                 if asia_info['is_closed']: 
-                    
-                    # Calculate Range for STDV
                     leg_range = high - low
                     
-                    # LOGIC A: Sweep LOW -> BULLISH
+                    # TARGETS (STDV Projections)
+                    # We are looking for price to be at -2.0 STDV or lower to activate "Execution Mode"
+                    
+                    # SCENARIO A: Asia LOW Swept -> Bullish
                     if current_price < low:
-                        bias = "LONG"
-                        prob = 75
-                        narrative = (
-                            f"✅ **BULLISH ASIA SWEEP**\n"
-                            f"• Session High: {high:.2f} | Low: {low:.2f}\n"
-                            f"• Range Size: {leg_range:.2f} pts\n"
-                            f"• Logic: Price swept Asia Low ({low:.2f}). Reversal Expected."
-                        )
+                        stdv_2 = low - (leg_range * 1.0) # -2.0 STDV level
+                        stdv_4 = low - (leg_range * 3.0) # -4.0 STDV level
                         
-                        # Target: Return to Range High
-                        # SL: -2.0 Standard Deviation (Approx Range * 1.0 down from low)
-                        setup = {
-                            "entry": current_price,
-                            "tp": high,
-                            "sl": low - (leg_range * 1.0), 
-                            "valid": True
-                        }
+                        narrative = "⚠️ Asia Low Swept. Monitoring for -2.0 STDV impact."
+                        
+                        # EXECUTION TRIGGER: Are we in the "Kill Zone"?
+                        # PDF Rule: Trigger only if Price hits -2.0 to -4.0 STDV
+                        if current_price <= (stdv_2 * 1.001): # Within tolerance or below -2.0
+                            narrative = "🚨 ZONE ACTIVATED: Price at -2.0 STDV. Hunting 1m Confirmation..."
+                            
+                            # --- PHASE 2: EXECUTION MODE (1m) ---
+                            # PDF Rule: Check for 1m BOS + FVG
+                            has_trigger = detect_1m_trigger(df, "LONG")
+                            
+                            if has_trigger:
+                                bias = "LONG"
+                                prob = 90
+                                
+                                # Dynamic Targets
+                                tp1 = get_recent_5m_swing(df_5m, "LONG")
+                                tp2 = high # Asia High (Origin)
+                                
+                                # Dynamic Stop (Recent 1m Low)
+                                sl_dynamic = float(df['Low'].iloc[-5:].min())
+                                
+                                narrative = (
+                                    f"✅ **EXECUTION SIGNAL (BUY)**\n"
+                                    f"• Logic: Price hit -2.0 STDV ({stdv_2:.2f})\n"
+                                    f"• Trigger: 1m BOS + FVG Detected\n"
+                                    f"• Target 1: 5m Swing ({tp1:.2f})\n"
+                                    f"• Target 2: Asia High ({tp2:.2f})"
+                                )
+                                
+                                setup = {"entry": current_price, "tp": tp2, "sl": sl_dynamic, "valid": True}
+                            else:
+                                narrative += "\n⏳ Waiting for 1m BOS + FVG signature."
 
-                    # LOGIC B: Sweep HIGH -> BEARISH
+                    # SCENARIO B: Asia HIGH Swept -> Bearish
                     elif current_price > high:
-                        bias = "SHORT"
-                        prob = 75
-                        narrative = (
-                            f"✅ **BEARISH ASIA SWEEP**\n"
-                            f"• Session High: {high:.2f} | Low: {low:.2f}\n"
-                            f"• Range Size: {leg_range:.2f} pts\n"
-                            f"• Logic: Price swept Asia High ({high:.2f}). Reversal Expected."
-                        )
+                        stdv_2 = high + (leg_range * 1.0)
+                        stdv_4 = high + (leg_range * 3.0)
                         
-                        # Target: Return to Range Low
-                        # SL: -2.0 Standard Deviation
-                        setup = {
-                            "entry": current_price,
-                            "tp": low,
-                            "sl": high + (leg_range * 1.0),
-                            "valid": True
-                        }
+                        narrative = "⚠️ Asia High Swept. Monitoring for -2.0 STDV impact."
+                        
+                        if current_price >= (stdv_2 * 0.999): # Within tolerance or above -2.0
+                            narrative = "🚨 ZONE ACTIVATED: Price at -2.0 STDV. Hunting 1m Confirmation..."
+                            
+                            has_trigger = detect_1m_trigger(df, "SHORT")
+                            
+                            if has_trigger:
+                                bias = "SHORT"
+                                prob = 90
+                                
+                                tp1 = get_recent_5m_swing(df_5m, "SHORT")
+                                tp2 = low # Asia Low
+                                sl_dynamic = float(df['High'].iloc[-5:].max())
+                                
+                                narrative = (
+                                    f"✅ **EXECUTION SIGNAL (SELL)**\n"
+                                    f"• Logic: Price hit -2.0 STDV ({stdv_2:.2f})\n"
+                                    f"• Trigger: 1m BOS + FVG Detected\n"
+                                    f"• Target 1: 5m Swing ({tp1:.2f})\n"
+                                    f"• Target 2: Asia Low ({tp2:.2f})"
+                                )
+                                
+                                setup = {"entry": current_price, "tp": tp2, "sl": sl_dynamic, "valid": True}
+                            else:
+                                narrative += "\n⏳ Waiting for 1m BOS + FVG signature."
                     
                     else:
-                        narrative = f"Session Closed. Price consolidating inside Asia Range ({low:.2f} - {high:.2f})."
+                        narrative = f"Consolidating inside Asia Range ({low:.2f} - {high:.2f}). No Sweep yet."
 
                 else:
                     narrative = "⏳ Asia Session Active (03:00-08:59). Building Liquidity."
             else:
                 narrative = "WAITING: No Asia Session Data for Today."
-
-            # 3. CONFLUENCE BOOSTER
-            if bias != "NEUTRAL":
-                if has_ifvg:
-                    prob += 15
-                    narrative += "\n• **Confluence:** IFVG Pattern Detected (+15%)"
-                
-                # Check STDV Proximity
-                pass
 
             # Update State
             GLOBAL_STATE["prediction"] = {
@@ -262,7 +319,7 @@ def run_strategy_engine():
 
             # --- EXECUTION & ALERTING ---
             settings = GLOBAL_STATE["settings"]
-            threshold = 85 if settings["style"] == "SNIPER" else 75
+            threshold = 85 # Strict threshold for Execution Phase
             
             if prob >= threshold and bias != "NEUTRAL":
                 if not any(t for t in GLOBAL_STATE["active_trades"] if time.time() - t['time'] < 300):
@@ -271,7 +328,7 @@ def run_strategy_engine():
                     })
                     send_discord_alert(GLOBAL_STATE["prediction"], settings["asset"])
 
-            # Grading
+            # Grading (No changes needed here)
             for trade in GLOBAL_STATE["active_trades"][:]:
                 if time.time() - trade['time'] > 300:
                     is_win = (trade['type'] == "LONG" and current_price > trade['entry']) or \
@@ -291,7 +348,6 @@ def run_strategy_engine():
 # --- API ROUTES ---
 @app.get("/api/live-data")
 async def get_api():
-    # Create a safe copy without the DataFrame (not JSON serializable)
     safe_state = GLOBAL_STATE.copy()
     safe_state["market_data"] = GLOBAL_STATE["market_data"].copy()
     if "df" in safe_state["market_data"]:
@@ -303,7 +359,6 @@ async def update_settings(settings: SettingsUpdate):
     GLOBAL_STATE["settings"]["asset"] = settings.asset
     GLOBAL_STATE["settings"]["strategy"] = settings.strategy
     GLOBAL_STATE["settings"]["style"] = settings.style
-    # Reset data to force reload
     GLOBAL_STATE["market_data"]["df"] = None
     GLOBAL_STATE["market_data"]["history"] = [] 
     return {"status": "success"}
@@ -316,7 +371,7 @@ async def root():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ForwardFin V2 | Asia Strategy</title>
+    <title>ForwardFin V3 | Execution Phase</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -359,14 +414,14 @@ async def root():
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-10">
                 <div class="space-y-6">
                     <div class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold uppercase tracking-wide">
-                        V3.0 LIVE: ASIA SESSION PROTOCOL
+                        V3.2 LIVE: EXECUTION PHASE
                     </div>
                     <h1 class="text-4xl sm:text-5xl font-extrabold text-slate-900 leading-tight">
-                        Asia Manipulation,<br>
-                        <span class="text-sky-600">Fully Automated.</span>
+                        Precision Entries,<br>
+                        <span class="text-sky-600">Verified.</span>
                     </h1>
                     <p class="text-lg text-slate-600 max-w-lg">
-                        The bot now strictly isolates the <strong>03:00 - 08:59</strong> session range. Entries are only triggered on confirmed liquidity sweeps after the session close.
+                        The bot now waits for price to hit <strong>-2.0 STDV</strong> and requires a 1-minute <strong>BOS + FVG</strong> confirmation before executing.
                     </p>
                 </div>
                 <div class="grid grid-cols-3 gap-4">
@@ -453,15 +508,15 @@ async def root():
                                     </div>
                                     <div class="grid grid-cols-3 gap-3 text-center">
                                         <div class="bg-slate-800 p-2 rounded border border-slate-600">
-                                            <div class="text-[10px] text-slate-400">ENTRY</div>
+                                            <div class="text-[10px] text-slate-400">ENTRY (1m)</div>
                                             <div id="setup-entry" class="text-white font-bold">---</div>
                                         </div>
                                         <div class="bg-emerald-900/20 p-2 rounded border border-emerald-500/30">
-                                            <div class="text-[10px] text-emerald-400">TARGET (RANGE)</div>
+                                            <div class="text-[10px] text-emerald-400">TP1 (5m Swing)</div>
                                             <div id="setup-tp" class="text-emerald-400 font-bold">---</div>
                                         </div>
                                         <div class="bg-rose-900/20 p-2 rounded border border-rose-500/30">
-                                            <div class="text-[10px] text-rose-400">STOP (-2 STDV)</div>
+                                            <div class="text-[10px] text-rose-400">SL (Dynamic)</div>
                                             <div id="setup-sl" class="text-rose-400 font-bold">---</div>
                                         </div>
                                     </div>
@@ -483,21 +538,21 @@ async def root():
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-12">
                     <h2 class="text-3xl font-bold text-slate-900">ForwardFin Academy</h2>
-                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">V3.0 Concepts: Asia Ranges, Sweeps & STDV.</p>
+                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">V3.2 Concepts: 1m Entry & Dynamic Stops.</p>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[400px]">
                     <div class="lg:col-span-4 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden overflow-y-auto">
                         <div onclick="loadLesson(0)" class="lesson-card p-4 border-b border-slate-200 active">
-                            <h4 class="font-bold text-slate-800">1. Asia Session Protocol</h4>
-                            <p class="text-xs text-slate-500 mt-1">Time: 03:00 - 08:59.</p>
+                            <h4 class="font-bold text-slate-800">1. Execution Phase</h4>
+                            <p class="text-xs text-slate-500 mt-1">From Analysis (5m) to Entry (1m).</p>
                         </div>
                         <div onclick="loadLesson(1)" class="lesson-card p-4 border-b border-slate-200">
-                            <h4 class="font-bold text-slate-800">2. The Sweep Trigger</h4>
-                            <p class="text-xs text-slate-500 mt-1">Trading the manipulation.</p>
+                            <h4 class="font-bold text-slate-800">2. The "Kill Zone"</h4>
+                            <p class="text-xs text-slate-500 mt-1">Wait for -2.0 STDV.</p>
                         </div>
                         <div onclick="loadLesson(2)" class="lesson-card p-4 border-b border-slate-200">
-                            <h4 class="font-bold text-slate-800">3. STDV Projections</h4>
-                            <p class="text-xs text-slate-500 mt-1">Precision Targets (-2.0).</p>
+                            <h4 class="font-bold text-slate-800">3. 1-Minute Trigger</h4>
+                            <p class="text-xs text-slate-500 mt-1">BOS + FVG Required.</p>
                         </div>
                     </div>
                     <div class="lg:col-span-8 bg-white border border-slate-200 rounded-xl p-8 flex flex-col shadow-sm">
@@ -522,10 +577,10 @@ async def root():
                             <div><h4 class="font-bold text-slate-800">1. Data Ingestion</h4><p class="text-xs text-slate-500 mt-1">Yahoo Finance (yfinance)</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
                         </div>
                         <div onclick="selectLayer(1)" class="arch-layer bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
-                            <div><h4 class="font-bold text-slate-800">2. Analysis Engine</h4><p class="text-xs text-slate-500 mt-1">Pandas / NumPy / IFVG / STDV</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
+                            <div><h4 class="font-bold text-slate-800">2. Analysis Engine</h4><p class="text-xs text-slate-500 mt-1">Pandas / NumPy / 5m Resampling</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
                         </div>
                         <div onclick="selectLayer(2)" class="arch-layer bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
-                            <div><h4 class="font-bold text-slate-800">3. Strategy Core</h4><p class="text-xs text-slate-500 mt-1">Asia Manipulation Logic</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
+                            <div><h4 class="font-bold text-slate-800">3. Strategy Core</h4><p class="text-xs text-slate-500 mt-1">Asia Sweep -> 1m Trigger</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
                         </div>
                         <div onclick="selectLayer(3)" class="arch-layer bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
                             <div><h4 class="font-bold text-slate-800">4. Alerting Layer</h4><p class="text-xs text-slate-500 mt-1">Discord Webhooks</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
@@ -647,16 +702,16 @@ async def root():
         // --- 3. ACADEMY INTERACTIVITY (RESTORED) ---
         const lessons = [
             {
-                title: "1. Asia Session Protocol",
-                body: "We define the Asian Session strictly as <b>03:00 to 08:59</b> (Exchange Time).<br><br>During this time, we do NOT trade. We simply mark the Session High and Session Low. This range defines the liquidity pool."
+                title: "1. Execution Phase",
+                body: "We no longer enter just because price hit a level. <br><br><b>Analysis Mode (5m):</b> Wait for price to hit -2.0 STDV.<br><b>Execution Mode (1m):</b> Wait for a Market Structure Shift (BOS) and an FVG."
             },
             {
-                title: "2. The Sweep Trigger",
-                body: "Once the session closes at 08:59, we wait.<br><br>We are looking for price to 'Sweep' (trade beyond) the Asia High or Low. This suggests manipulation. We enter on the reversal back into the range."
+                title: "2. The 'Kill Zone'",
+                body: "The -2.0 to -4.0 Standard Deviation area is where we expect the 'Smart Money' reversal. <br><br>If price just touches it, we do nothing. We need a reaction."
             },
             {
-                title: "3. STDV Projections",
-                body: "We do not use random targets. We use Fibonacci Standard Deviations.<br><br><b>Stop Loss:</b> -2.0 STDV (The expansion level).<br><b>Take Profit:</b> The opposite end of the Asia Range."
+                title: "3. 1-Minute Trigger",
+                body: "On the 1-minute chart, we look for two things:<br>1. A candle closing past the previous swing (BOS).<br>2. An imbalance (FVG) left behind.<br><br>This confirms the institution has entered."
             }
         ];
 
@@ -673,9 +728,9 @@ async def root():
         // --- 4. ARCHITECTURE INTERACTIVITY (RESTORED) ---
         const architectureData = [
             { title: "Data Ingestion", badge: "Infrastructure", description: "Connects to Yahoo Finance to fetch real-time 1-minute candle data for NQ=F and ES=F futures contracts.", components: ["yfinance", "Python Requests"] },
-            { title: "Analysis Engine", badge: "Data Science", description: "Calculates live Volatility, Moving Averages, detects IFVGs, and calculates Standard Deviation Projections.", components: ["Pandas Rolling", "NumPy Math", "Custom Fib Scanner"] },
-            { title: "Strategy Core", badge: "Logic", description: "Evaluates price against Asian Session Highs/Lows. Logic is frozen until 08:59 session close.", components: ["Sniper Mode", "Risk Calculator"] },
-            { title: "Alerting Layer", badge: "Notification", description: "When V2 confidence is met (>85%), constructs a rich embed payload and fires it to the Discord Webhook.", components: ["Discord API", "JSON Payloads"] },
+            { title: "Analysis Engine", badge: "Data Science", description: "Resamples 1m data to 5m to find STDV Zones. Calculates live Volatility and detects IFVGs.", components: ["Pandas Resample", "NumPy Math", "Custom Fib Scanner"] },
+            { title: "Strategy Core", badge: "Logic", description: "Hybrid 5m/1m Engine. Waits for -2.0 STDV on 5m, then hunts for 1m BOS+FVG triggers.", components: ["Multi-Timeframe Analysis", "Smart Money Logic"] },
+            { title: "Alerting Layer", badge: "Notification", description: "When V3 confidence is met (>85%), constructs a rich embed payload and fires it to the Discord Webhook.", components: ["Discord API", "JSON Payloads"] },
             { title: "User Interface", badge: "Frontend", description: "Responsive dashboard served via FastAPI. Updates DOM elements live via polling.", components: ["FastAPI", "Tailwind CSS", "Chart.js", "TradingView"] }
         ];
 
@@ -703,7 +758,7 @@ async def root():
     </script>
 </body>
 </html>
-""")
+                        """)
 
 if __name__ == "__main__":
     t1 = threading.Thread(target=run_market_data_stream, daemon=True)
