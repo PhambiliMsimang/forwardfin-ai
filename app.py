@@ -31,15 +31,17 @@ GLOBAL_STATE = {
         "fib_status": "NEUTRAL",
         "session_high": 0.00,
         "session_low": 0.00,
-        "history": [], # For UI Chart
-        "df": None,    # For Logic (Full DataFrame)
+        "history": [], 
+        "df": None,    
         "highs": [],
-        "lows": []
+        "lows": [],
+        # NEW: SMT Data Store
+        "aux_data": {"NQ": None, "ES": None} 
     },
     "prediction": {
         "bias": "NEUTRAL", 
         "probability": 50, 
-        "narrative": "V3 System Initializing...",
+        "narrative": "V3.4 System Initializing...",
         "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "valid": False}
     },
     "performance": {"wins": 0, "total": 0, "win_rate": 0},
@@ -75,7 +77,7 @@ def send_discord_alert(data, asset):
                 {"name": "🛑 SL (Dynamic)", "value": f"${data['trade_setup']['sl']:,.2f}", "inline": True},
                 {"name": "Confidence", "value": f"{data['probability']}%", "inline": True}
             ],
-            "footer": {"text": f"ForwardFin V3 • {strategy_name} • Execution Phase Verified"}
+            "footer": {"text": f"ForwardFin V3.4 • SMT Logic Active • Execution Verified"}
         }
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
         GLOBAL_STATE["last_alert_time"] = time.time()
@@ -83,31 +85,40 @@ def send_discord_alert(data, asset):
     except Exception as e:
         print(f"❌ Discord Error: {e}", flush=True)
 
-# --- WORKER 1: REAL FUTURES DATA ---
+# --- WORKER 1: REAL FUTURES DATA (DUAL STREAM) ---
 def run_market_data_stream():
-    print("📡 DATA THREAD: Connecting to CME Futures...", flush=True)
+    print("📡 DATA THREAD: Connecting to Dual Streams (NQ + ES)...", flush=True)
     while True:
         try:
-            ticker_map = {"NQ1!": "NQ=F", "ES1!": "ES=F"}
-            current_asset = GLOBAL_STATE["settings"]["asset"]
-            ticker = ticker_map.get(current_asset, "NQ=F")
-
-            # Download data (ensure we get enough rows for the day)
-            data = yf.download(ticker, period="2d", interval="1m", progress=False)
+            # We fetch BOTH assets now for SMT logic
+            tickers = "NQ=F ES=F"
+            data = yf.download(tickers, period="2d", interval="1m", progress=False, group_by='ticker')
             
+            # Identify current traded asset
+            current_asset_symbol = GLOBAL_STATE["settings"]["asset"]
+            if current_asset_symbol == "NQ1!":
+                main_ticker, aux_ticker = "NQ=F", "ES=F"
+                main_key, aux_key = "NQ", "ES"
+            else:
+                main_ticker, aux_ticker = "ES=F", "NQ=F"
+                main_key, aux_key = "ES", "NQ"
+
             if not data.empty:
-                current_price = float(data['Close'].iloc[-1])
+                # 1. Process Main Traded Asset
+                df_main = data[main_ticker]
+                current_price = float(df_main['Close'].iloc[-1])
                 
-                # Update Simple Data for UI
                 GLOBAL_STATE["market_data"]["price"] = current_price
-                GLOBAL_STATE["market_data"]["history"] = data['Close'].tolist()[-100:] # limit for UI
-                GLOBAL_STATE["market_data"]["highs"] = data['High'].tolist()[-100:]
-                GLOBAL_STATE["market_data"]["lows"] = data['Low'].tolist()[-100:]
+                GLOBAL_STATE["market_data"]["history"] = df_main['Close'].tolist()[-100:]
+                GLOBAL_STATE["market_data"]["highs"] = df_main['High'].tolist()[-100:]
+                GLOBAL_STATE["market_data"]["lows"] = df_main['Low'].tolist()[-100:]
+                GLOBAL_STATE["market_data"]["df"] = df_main
                 
-                # CRITICAL: Store full DF for Strategy Engine to perform Time Slicing
-                GLOBAL_STATE["market_data"]["df"] = data
+                # 2. Store AUX Asset for SMT Comparison
+                GLOBAL_STATE["market_data"]["aux_data"][main_key] = df_main # Store self
+                GLOBAL_STATE["market_data"]["aux_data"][aux_key] = data[aux_ticker] # Store correlation pair
                 
-                print(f"✅ TICK [{current_asset}]: ${current_price:,.2f}", flush=True)
+                print(f"✅ TICK [{current_asset_symbol}]: ${current_price:,.2f} | SMT Data Loaded", flush=True)
             
         except Exception as e:
             print(f"⚠️ Data Error: {e}", flush=True)
@@ -129,7 +140,6 @@ def get_asia_session_data(df):
     session_data = df.loc[mask]
     if session_data.empty: return None
 
-    # Using Consolidated Rule (Whole Session) as baseline anchor
     return {
         "high": float(session_data['High'].max()),
         "low": float(session_data['Low'].min()),
@@ -138,72 +148,78 @@ def get_asia_session_data(df):
 
 def resample_to_5m(df):
     """Resamples 1m data to 5m for Analysis Mode."""
-    ohlc_dict = {
-        'Open': 'first',
-        'High': 'max',
-        'Low': 'min',
-        'Close': 'last',
-        'Volume': 'sum'
-    }
-    # Resample and drop incomplete bars
+    ohlc_dict = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last'}
     df_5m = df.resample('5min').apply(ohlc_dict).dropna()
     return df_5m
 
+# --- HELPER: SMT DIVERGENCE CHECK ---
+def check_smt_divergence(main_df, aux_df, sweep_type):
+    """
+    Checks if the correlated asset FAILED to sweep while the main asset did.
+    sweep_type: "LOW" (Bullish) or "HIGH" (Bearish)
+    """
+    if aux_df is None or main_df is None: return False
+    
+    # Get Asia Session for AUX asset
+    aux_asia = get_asia_session_data(aux_df)
+    if not aux_asia or not aux_asia['is_closed']: return False
+    
+    current_aux_price = aux_df['Close'].iloc[-1]
+    
+    if sweep_type == "LOW": # Bullish SMT Check
+        # Main asset swept LOW. Did Aux asset sweep LOW too?
+        # If Aux Price > Aux Asia Low, it FAILED to sweep -> SMT Divergence (Bullish)
+        if current_aux_price > aux_asia['low']:
+            return True # Divergence confirmed
+            
+    elif sweep_type == "HIGH": # Bearish SMT Check
+        # Main asset swept HIGH. Did Aux asset sweep HIGH too?
+        # If Aux Price < Aux Asia High, it FAILED to sweep -> SMT Divergence (Bearish)
+        if current_aux_price < aux_asia['high']:
+            return True # Divergence confirmed
+            
+    return False # Correlation holds (both swept)
+
 # --- HELPER: 1-MINUTE EXECUTION TRIGGERS ---
 def detect_1m_trigger(df, trend_bias):
-    """
-    Checks for the Mandatory 1-Minute Checklist:
-    1. MSS (Market Structure Shift / BOS)
-    2. FVG (Imbalance)
-    """
     if len(df) < 5: return False
-    
-    # Simple FVG Detection (1m)
-    
     is_fvg = False
     is_bos = False
     
     # Look at the last 3 closed candles
-    last_c = df.iloc[-2] # Last completed candle
-    prev_c = df.iloc[-3]
-    
     if trend_bias == "LONG":
-        # Bullish FVG pattern check (Low of recent > High of 2 back)
-        if df['Low'].iloc[-2] > df['High'].iloc[-4]: 
-            is_fvg = True
-        # BOS: Close above previous swing high (simplified as recent local high)
-        if df['Close'].iloc[-1] > df['High'].iloc[-3]: 
-            is_bos = True
+        # Bullish FVG (Low of recent > High of 2 back)
+        if df['Low'].iloc[-2] > df['High'].iloc[-4]: is_fvg = True
+        # BOS (Close above previous local high)
+        if df['Close'].iloc[-1] > df['High'].iloc[-3]: is_bos = True
             
     elif trend_bias == "SHORT":
-        # Bearish FVG pattern check
-        if df['High'].iloc[-2] < df['Low'].iloc[-4]: 
-            is_fvg = True
-        # BOS: Close below previous swing low
-        if df['Close'].iloc[-1] < df['Low'].iloc[-3]: 
-            is_bos = True
+        # Bearish FVG
+        if df['High'].iloc[-2] < df['Low'].iloc[-4]: is_fvg = True
+        # BOS
+        if df['Close'].iloc[-1] < df['Low'].iloc[-3]: is_bos = True
             
     return is_fvg and is_bos
 
 # --- HELPER: 5M SWING DETECTION (For TP1) ---
 def get_recent_5m_swing(df_5m, bias):
-    """Finds the most recent 5m swing high or low for TP1."""
     if len(df_5m) < 10: return 0
-    if bias == "LONG":
-        # Target recent swing High (resistance)
-        return float(df_5m['High'].iloc[-10:].max())
-    else:
-        # Target recent swing Low (support)
-        return float(df_5m['Low'].iloc[-10:].min())
+    if bias == "LONG": return float(df_5m['High'].iloc[-10:].max())
+    else: return float(df_5m['Low'].iloc[-10:].min())
 
 # --- WORKER 2: THE STRATEGY BRAIN ---
 def run_strategy_engine():
-    print("🧠 BRAIN THREAD: Asia Execution Protocol Loaded...", flush=True)
+    print("🧠 BRAIN THREAD: Asia SMT Protocol Loaded...", flush=True)
     while True:
         try:
             market = GLOBAL_STATE["market_data"]
             current_price = market["price"]
             df = market["df"]
+            
+            # Retrieve Aux Data for SMT
+            current_asset = GLOBAL_STATE["settings"]["asset"]
+            aux_key = "ES" if current_asset == "NQ1!" else "NQ"
+            df_aux = market["aux_data"].get(aux_key)
 
             if df is None or len(market["history"]) < 20: 
                 time.sleep(5)
@@ -211,7 +227,7 @@ def run_strategy_engine():
 
             # 1. PREP DATA
             asia_info = get_asia_session_data(df)
-            df_5m = resample_to_5m(df) # Create 5m view for Analysis Mode
+            df_5m = resample_to_5m(df) 
             
             bias = "NEUTRAL"
             prob = 50
@@ -228,94 +244,88 @@ def run_strategy_engine():
                 if asia_info['is_closed']: 
                     leg_range = high - low
                     
-                    # TARGETS (STDV Projections)
-                    
                     # SCENARIO A: Asia LOW Swept -> Bullish
                     if current_price < low:
-                        stdv_2 = low - (leg_range * 1.0) # -2.0 STDV level (Range * 1 projected down)
+                        stdv_2 = low - (leg_range * 1.0)
                         
-                        narrative = "⚠️ Asia Low Swept. Monitoring for -2.0 STDV impact."
+                        narrative = "⚠️ Asia Low Swept. Monitoring for -2.0 STDV."
                         
-                        # EXECUTION TRIGGER: Are we in the "Kill Zone"?
-                        if current_price <= (stdv_2 * 1.001): # Within tolerance or below -2.0
-                            narrative = "🚨 ZONE ACTIVATED: Price at -2.0 STDV. Hunting 1m Confirmation..."
+                        if current_price <= (stdv_2 * 1.001): 
+                            narrative = "🚨 KILL ZONE (-2.0 STDV). Checking SMT & Trigger..."
+                            
+                            # --- SMT CHECK ---
+                            has_smt = check_smt_divergence(df, df_aux, "LOW")
+                            smt_text = "✅ SMT Divergence (High Confidence)" if has_smt else "⚠️ No SMT (Correlation)"
                             
                             # --- PHASE 2: EXECUTION MODE (1m) ---
                             has_trigger = detect_1m_trigger(df, "LONG")
                             
                             if has_trigger:
                                 bias = "LONG"
-                                prob = 90
+                                prob = 95 if has_smt else 85
                                 
-                                # Dynamic Targets
-                                tp1 = get_recent_5m_swing(df_5m, "LONG") # TP1: 5m Swing
-                                tp2 = high # TP2: Asia High (Origin)
-                                
-                                # Dynamic Stop (Recent 1m Low below entry candle)
+                                tp1 = get_recent_5m_swing(df_5m, "LONG")
+                                tp2 = high 
                                 sl_dynamic = float(df['Low'].iloc[-5:].min())
                                 
                                 narrative = (
                                     f"✅ **EXECUTION SIGNAL (BUY)**\n"
-                                    f"• Logic: Price hit -2.0 STDV ({stdv_2:.2f})\n"
-                                    f"• Trigger: 1m BOS + FVG Detected\n"
-                                    f"• Target 1: 5m Swing ({tp1:.2f})\n"
-                                    f"• Target 2: Asia High ({tp2:.2f})"
+                                    f"• Logic: Price hit -2.0 STDV\n"
+                                    f"• SMT Status: {smt_text}\n"
+                                    f"• Trigger: 1m BOS + FVG Detected"
                                 )
-                                
                                 setup = {"entry": current_price, "tp": tp2, "sl": sl_dynamic, "valid": True}
                             else:
-                                narrative += "\n⏳ Waiting for 1m BOS + FVG signature."
+                                narrative += f"\n⏳ Waiting for 1m BOS+FVG. ({smt_text})"
 
                     # SCENARIO B: Asia HIGH Swept -> Bearish
                     elif current_price > high:
-                        stdv_2 = high + (leg_range * 1.0) # -2.0 STDV level projected up
+                        stdv_2 = high + (leg_range * 1.0)
                         
-                        narrative = "⚠️ Asia High Swept. Monitoring for -2.0 STDV impact."
+                        narrative = "⚠️ Asia High Swept. Monitoring for -2.0 STDV."
                         
-                        if current_price >= (stdv_2 * 0.999): # Within tolerance or above -2.0
-                            narrative = "🚨 ZONE ACTIVATED: Price at -2.0 STDV. Hunting 1m Confirmation..."
+                        if current_price >= (stdv_2 * 0.999):
+                            narrative = "🚨 KILL ZONE (-2.0 STDV). Checking SMT & Trigger..."
+                            
+                            # --- SMT CHECK ---
+                            has_smt = check_smt_divergence(df, df_aux, "HIGH")
+                            smt_text = "✅ SMT Divergence (High Confidence)" if has_smt else "⚠️ No SMT (Correlation)"
                             
                             has_trigger = detect_1m_trigger(df, "SHORT")
                             
                             if has_trigger:
                                 bias = "SHORT"
-                                prob = 90
+                                prob = 95 if has_smt else 85
                                 
                                 tp1 = get_recent_5m_swing(df_5m, "SHORT")
-                                tp2 = low # Asia Low
+                                tp2 = low 
                                 sl_dynamic = float(df['High'].iloc[-5:].max())
                                 
                                 narrative = (
                                     f"✅ **EXECUTION SIGNAL (SELL)**\n"
-                                    f"• Logic: Price hit -2.0 STDV ({stdv_2:.2f})\n"
-                                    f"• Trigger: 1m BOS + FVG Detected\n"
-                                    f"• Target 1: 5m Swing ({tp1:.2f})\n"
-                                    f"• Target 2: Asia Low ({tp2:.2f})"
+                                    f"• Logic: Price hit -2.0 STDV\n"
+                                    f"• SMT Status: {smt_text}\n"
+                                    f"• Trigger: 1m BOS + FVG Detected"
                                 )
-                                
                                 setup = {"entry": current_price, "tp": tp2, "sl": sl_dynamic, "valid": True}
                             else:
-                                narrative += "\n⏳ Waiting for 1m BOS + FVG signature."
+                                narrative += f"\n⏳ Waiting for 1m BOS+FVG. ({smt_text})"
                     
                     else:
-                        narrative = f"Consolidating inside Asia Range ({low:.2f} - {high:.2f}). No Sweep yet."
+                        narrative = f"Consolidating inside Asia Range ({low:.2f} - {high:.2f})."
 
                 else:
-                    narrative = "⏳ Asia Session Active (03:00-08:59). Building Liquidity."
+                    narrative = "⏳ Asia Session Active (03:00-08:59)."
             else:
-                narrative = "WAITING: No Asia Session Data for Today."
+                narrative = "WAITING: No Asia Session Data."
 
-            # Update State
             GLOBAL_STATE["prediction"] = {
-                "bias": bias,
-                "probability": prob,
-                "narrative": narrative,
-                "trade_setup": setup
+                "bias": bias, "probability": prob, "narrative": narrative, "trade_setup": setup
             }
 
             # --- EXECUTION & ALERTING ---
             settings = GLOBAL_STATE["settings"]
-            threshold = 85 # Strict threshold for Execution Phase
+            threshold = 85 
             
             if prob >= threshold and bias != "NEUTRAL":
                 if not any(t for t in GLOBAL_STATE["active_trades"] if time.time() - t['time'] < 300):
@@ -346,8 +356,9 @@ def run_strategy_engine():
 async def get_api():
     safe_state = GLOBAL_STATE.copy()
     safe_state["market_data"] = GLOBAL_STATE["market_data"].copy()
-    if "df" in safe_state["market_data"]:
-        del safe_state["market_data"]["df"]
+    # Remove complex DF objects before JSON response
+    if "df" in safe_state["market_data"]: del safe_state["market_data"]["df"]
+    if "aux_data" in safe_state["market_data"]: del safe_state["market_data"]["aux_data"]
     return safe_state
 
 @app.post("/api/update-settings")
@@ -367,7 +378,7 @@ async def root():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ForwardFin V3 | Execution Phase</title>
+    <title>ForwardFin V3.4 | SMT Enabled</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -410,14 +421,14 @@ async def root():
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-10">
                 <div class="space-y-6">
                     <div class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold uppercase tracking-wide">
-                        V3.2 LIVE: EXECUTION PHASE
+                        V3.4 LIVE: SMT DIVERGENCE
                     </div>
                     <h1 class="text-4xl sm:text-5xl font-extrabold text-slate-900 leading-tight">
                         Precision Entries,<br>
-                        <span class="text-sky-600">Verified.</span>
+                        <span class="text-sky-600">Smart Money Verified.</span>
                     </h1>
                     <p class="text-lg text-slate-600 max-w-lg">
-                        The bot now waits for price to hit <strong>-2.0 STDV</strong> and requires a 1-minute <strong>BOS + FVG</strong> confirmation before executing.
+                        The bot now tracks <strong>NQ vs ES correlation</strong>. It waits for one asset to sweep liquidity while the other fails (SMT), confirming institutional manipulation.
                     </p>
                 </div>
                 <div class="grid grid-cols-3 gap-4">
@@ -534,13 +545,13 @@ async def root():
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-12">
                     <h2 class="text-3xl font-bold text-slate-900">ForwardFin Academy</h2>
-                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">V3.2 Concepts: 1m Entry & Dynamic Stops.</p>
+                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">V3.4 Concepts: SMT Divergence & Liquidity.</p>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[400px]">
                     <div class="lg:col-span-4 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden overflow-y-auto">
                         <div onclick="loadLesson(0)" class="lesson-card p-4 border-b border-slate-200 active">
-                            <h4 class="font-bold text-slate-800">1. Execution Phase</h4>
-                            <p class="text-xs text-slate-500 mt-1">From Analysis (5m) to Entry (1m).</p>
+                            <h4 class="font-bold text-slate-800">1. SMT Divergence</h4>
+                            <p class="text-xs text-slate-500 mt-1">Correlation Check.</p>
                         </div>
                         <div onclick="loadLesson(1)" class="lesson-card p-4 border-b border-slate-200">
                             <h4 class="font-bold text-slate-800">2. The "Kill Zone"</h4>
@@ -573,10 +584,10 @@ async def root():
                             <div><h4 class="font-bold text-slate-800">1. Data Ingestion</h4><p class="text-xs text-slate-500 mt-1">Yahoo Finance (yfinance)</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
                         </div>
                         <div onclick="selectLayer(1)" class="arch-layer bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
-                            <div><h4 class="font-bold text-slate-800">2. Analysis Engine</h4><p class="text-xs text-slate-500 mt-1">Pandas / NumPy / 5m Resampling</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
+                            <div><h4 class="font-bold text-slate-800">2. Analysis Engine</h4><p class="text-xs text-slate-500 mt-1">Pandas / NumPy / SMT Logic</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
                         </div>
                         <div onclick="selectLayer(2)" class="arch-layer bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
-                            <div><h4 class="font-bold text-slate-800">3. Strategy Core</h4><p class="text-xs text-slate-500 mt-1">Asia Sweep -> 1m Trigger</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
+                            <div><h4 class="font-bold text-slate-800">3. Strategy Core</h4><p class="text-xs text-slate-500 mt-1">Asia Sweep -> SMT -> 1m Trigger</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
                         </div>
                         <div onclick="selectLayer(3)" class="arch-layer bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
                             <div><h4 class="font-bold text-slate-800">4. Alerting Layer</h4><p class="text-xs text-slate-500 mt-1">Discord Webhooks</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
@@ -695,19 +706,19 @@ async def root():
             } catch (e) { console.log(e); }
         }
         
-        // --- 3. ACADEMY INTERACTIVITY (RESTORED) ---
+        // --- 3. ACADEMY INTERACTIVITY (RESTORED & UPDATED FOR SMT) ---
         const lessons = [
             {
-                title: "1. Execution Phase",
-                body: "We no longer enter just because price hit a level. <br><br><b>Analysis Mode (5m):</b> Wait for price to hit -2.0 STDV.<br><b>Execution Mode (1m):</b> Wait for a Market Structure Shift (BOS) and an FVG."
+                title: "1. SMT Divergence",
+                body: "<b>Smart Money Technique:</b> We compare NQ and ES.<br><br>If NQ sweeps a Low but ES <i>fails</i> to sweep its matching Low, that is a crack in correlation. It confirms 'Smart Money' is stepping in."
             },
             {
                 title: "2. The 'Kill Zone'",
-                body: "The -2.0 to -4.0 Standard Deviation area is where we expect the 'Smart Money' reversal. <br><br>If price just touches it, we do nothing. We need a reaction."
+                body: "The -2.0 to -4.0 Standard Deviation area is where we expect the reversal. We wait for price to hit this zone before looking for the SMT."
             },
             {
                 title: "3. 1-Minute Trigger",
-                body: "On the 1-minute chart, we look for two things:<br>1. A candle closing past the previous swing (BOS).<br>2. An imbalance (FVG) left behind.<br><br>This confirms the institution has entered."
+                body: "Once SMT is confirmed, we go to the 1-minute chart. We need a <b>BOS + FVG</b> to pull the trigger. SMT increases probability to >90%."
             }
         ];
 
@@ -754,7 +765,8 @@ async def root():
     </script>
 </body>
 </html>
-""")
+"""
+    )
 
 if __name__ == "__main__":
     t1 = threading.Thread(target=run_market_data_stream, daemon=True)
