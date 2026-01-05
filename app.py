@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import pytz 
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timedelta
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,7 +22,7 @@ ASIA_OPEN_TIME = dtime(3, 0)
 ASIA_CLOSE_TIME = dtime(8, 59) 
 
 # 2. TRADING WINDOW (Execution Phase) - 09:00 to 21:00 SAST
-# The bot will ONLY send signals between these hours.
+# The bot will STRICTLY only trade between these hours.
 TRADE_WINDOW_OPEN = dtime(9, 0)
 TRADE_WINDOW_CLOSE = dtime(21, 0) 
 
@@ -92,6 +92,7 @@ def send_discord_alert(data, asset):
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
         GLOBAL_STATE["last_alert_time"] = time.time()
         
+        # LATCH: Freeze UI for 5 mins
         GLOBAL_STATE["signal_latch"]["active"] = True
         GLOBAL_STATE["signal_latch"]["data"] = data
         GLOBAL_STATE["signal_latch"]["time"] = time.time()
@@ -106,6 +107,7 @@ def run_market_data_stream():
     while True:
         try:
             tickers = "NQ=F ES=F"
+            # Request valid data.
             data = yf.download(tickers, period="5d", interval="1m", progress=False, group_by='ticker')
             
             current_asset_symbol = GLOBAL_STATE["settings"]["asset"]
@@ -119,18 +121,30 @@ def run_market_data_stream():
             if not data.empty:
                 sa_tz = pytz.timezone('Africa/Johannesburg')
                 
+                # Process Main Asset
                 df_main = data[main_ticker].copy()
                 if df_main.index.tz is None: df_main.index = df_main.index.tz_localize('UTC')
                 df_main.index = df_main.index.tz_convert(sa_tz)
                 df_main = df_main.dropna()
 
+                # Process Aux Asset
                 df_aux_raw = data[aux_ticker].copy()
                 if df_aux_raw.index.tz is None: df_aux_raw.index = df_aux_raw.index.tz_localize('UTC')
                 df_aux_raw.index = df_aux_raw.index.tz_convert(sa_tz)
                 df_aux_raw = df_aux_raw.dropna()
+                
+                # --- STALE DATA CHECK (CRITICAL FIX) ---
+                last_candle_time = df_main.index[-1]
+                now_time = datetime.now(sa_tz)
+                
+                # If data is older than 10 minutes, ignore it.
+                if (now_time - last_candle_time).seconds > 600:
+                    print(f"⚠️ DATA LAG: Candle is from {last_candle_time.strftime('%H:%M')}. Current time {now_time.strftime('%H:%M')}. Skipping.", flush=True)
+                    time.sleep(20)
+                    continue
 
                 current_price = float(df_main['Close'].iloc[-1])
-                current_time_str = datetime.now(sa_tz).strftime('%H:%M:%S')
+                current_time_str = now_time.strftime('%H:%M:%S')
                 
                 GLOBAL_STATE["market_data"]["price"] = current_price
                 GLOBAL_STATE["market_data"]["server_time"] = current_time_str 
@@ -186,11 +200,9 @@ def check_smt_divergence(main_df, aux_df, sweep_type):
     current_aux_price = aux_synced['Close'].iloc[-1]
     
     if sweep_type == "LOW": 
-        # Main swept Low, did Aux sweep? If > Low, it FAILED -> SMT
         if current_aux_price > aux_asia['low']: return True 
             
     elif sweep_type == "HIGH": 
-        # Main swept High, did Aux sweep? If < High, it FAILED -> SMT
         if current_aux_price < aux_asia['high']: return True 
             
     return False 
@@ -219,7 +231,7 @@ def get_recent_5m_swing(df_5m, bias):
 
 # --- WORKER 2: THE STRATEGY BRAIN ---
 def run_strategy_engine():
-    print("🧠 BRAIN THREAD: Asia SMT Protocol + Trading Window Loaded...", flush=True)
+    print("🧠 BRAIN THREAD: V3.9 Protocol (Time-Gated) Loaded...", flush=True)
     while True:
         try:
             market = GLOBAL_STATE["market_data"]
@@ -247,7 +259,7 @@ def run_strategy_engine():
                     "narrative": f"😴 Market Closed. Trading Window: {TRADE_WINDOW_OPEN.strftime('%H:%M')} - {TRADE_WINDOW_CLOSE.strftime('%H:%M')} SAST.",
                     "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "valid": False}
                 }
-                time.sleep(5)
+                time.sleep(10)
                 continue # Skip all analysis logic
 
             # --- LATCH CHECK (GHOST SIGNAL FIX) ---
@@ -413,7 +425,7 @@ async def root():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ForwardFin V3.9 | SMT Latch</title>
+    <title>ForwardFin V3.9 | Time-Gated</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -467,7 +479,7 @@ async def root():
                         <span id="server-clock" class="font-bold text-slate-800">--:--:--</span>
                     </div>
                     <p class="text-lg text-slate-600 max-w-lg mt-4">
-                        The bot now tracks <strong>NQ vs ES correlation</strong>, locks signals for 5 minutes, and only hunts during the active day session (09:00 - 21:00).
+                        The bot now tracks <strong>NQ vs ES correlation</strong>, locks signals on the dashboard for 5 minutes, and only hunts during the active day session (09:00 - 21:00).
                     </p>
                 </div>
                 <div class="grid grid-cols-3 gap-4">
