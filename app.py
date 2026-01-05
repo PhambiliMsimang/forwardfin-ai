@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import pytz 
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timedelta
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,7 +32,7 @@ GLOBAL_STATE = {
     "market_data": {
         "price": 0.00,
         "ifvg_detected": False, 
-        "smt_detected": False, # NEW: Global SMT Status for UI
+        "smt_detected": False, # Global SMT Status
         "fib_status": "NEUTRAL",
         "session_high": 0.00,
         "session_low": 0.00,
@@ -40,17 +40,19 @@ GLOBAL_STATE = {
         "df": None,    
         "highs": [],
         "lows": [],
-        "aux_data": {"NQ": None, "ES": None} 
+        "aux_data": {"NQ": None, "ES": None},
+        "server_time": "" # NEW: For UI Clock
     },
     "prediction": {
         "bias": "NEUTRAL", 
         "probability": 50, 
-        "narrative": "V3.7 (SAST) System Initializing...",
+        "narrative": "V3.8 (SAST) System Initializing...",
         "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "valid": False}
     },
     "performance": {"wins": 0, "total": 0, "win_rate": 0},
     "active_trades": [],
-    "last_alert_time": 0
+    "last_alert_time": 0,
+    "signal_latch": {"active": False, "data": None, "time": 0} # NEW: Ghost Signal Fix
 }
 
 app = FastAPI()
@@ -81,11 +83,17 @@ def send_discord_alert(data, asset):
                 {"name": "🛑 SL (Dynamic)", "value": f"${data['trade_setup']['sl']:,.2f}", "inline": True},
                 {"name": "Confidence", "value": f"{data['probability']}%", "inline": True}
             ],
-            "footer": {"text": f"ForwardFin V3.7 • SAST Logic • SMT Verified"}
+            "footer": {"text": f"ForwardFin V3.8 • SAST Logic • SMT Verified"}
         }
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
         GLOBAL_STATE["last_alert_time"] = time.time()
-        print("✅ Discord Alert Sent!", flush=True)
+        
+        # ACTIVATE LATCH: Freeze this signal on the dashboard for 5 minutes
+        GLOBAL_STATE["signal_latch"]["active"] = True
+        GLOBAL_STATE["signal_latch"]["data"] = data
+        GLOBAL_STATE["signal_latch"]["time"] = time.time()
+        
+        print("✅ Discord Alert Sent & Latch Activated!", flush=True)
     except Exception as e:
         print(f"❌ Discord Error: {e}", flush=True)
 
@@ -120,8 +128,10 @@ def run_market_data_stream():
                 df_aux_raw = df_aux_raw.dropna()
 
                 current_price = float(df_main['Close'].iloc[-1])
+                current_time_str = datetime.now(sa_tz).strftime('%H:%M:%S')
                 
                 GLOBAL_STATE["market_data"]["price"] = current_price
+                GLOBAL_STATE["market_data"]["server_time"] = current_time_str # Update UI Clock
                 GLOBAL_STATE["market_data"]["history"] = df_main['Close'].tolist()[-100:]
                 GLOBAL_STATE["market_data"]["highs"] = df_main['High'].tolist()[-100:]
                 GLOBAL_STATE["market_data"]["lows"] = df_main['Low'].tolist()[-100:]
@@ -130,7 +140,7 @@ def run_market_data_stream():
                 GLOBAL_STATE["market_data"]["aux_data"][main_key] = df_main 
                 GLOBAL_STATE["market_data"]["aux_data"][aux_key] = df_aux_raw
                 
-                print(f"✅ TICK [{current_asset_symbol}]: ${current_price:,.2f} | SAST Time: {df_main.index[-1].strftime('%H:%M')}", flush=True)
+                print(f"✅ TICK [{current_asset_symbol}]: ${current_price:,.2f} | SAST: {current_time_str}", flush=True)
             
         except Exception as e:
             print(f"⚠️ Data Error: {e}", flush=True)
@@ -207,7 +217,7 @@ def get_recent_5m_swing(df_5m, bias):
 
 # --- WORKER 2: THE STRATEGY BRAIN ---
 def run_strategy_engine():
-    print("🧠 BRAIN THREAD: Asia SMT Protocol Loaded...", flush=True)
+    print("🧠 BRAIN THREAD: Asia SMT Protocol + Latch Loaded...", flush=True)
     while True:
         try:
             market = GLOBAL_STATE["market_data"]
@@ -222,6 +232,19 @@ def run_strategy_engine():
             if df is None or len(market["history"]) < 20: 
                 time.sleep(5)
                 continue
+            
+            # --- LATCH CHECK (GHOST SIGNAL FIX) ---
+            # If a signal fired recently, freeze the dashboard data
+            latch = GLOBAL_STATE["signal_latch"]
+            if latch["active"]:
+                if time.time() - latch["time"] < 300: # 5 Minute Hold
+                    # Overwrite current scanning data with the Latched Signal
+                    GLOBAL_STATE["prediction"] = latch["data"]
+                    time.sleep(1)
+                    continue # Skip the rest of the scan loop
+                else:
+                    # Latch expired
+                    GLOBAL_STATE["signal_latch"]["active"] = False
 
             # 1. PREP DATA
             asia_info = get_asia_session_data(df)
@@ -233,12 +256,11 @@ def run_strategy_engine():
             setup = {"entry": 0, "tp": 0, "sl": 0, "valid": False}
             
             # --- GLOBAL SMT MONITORING (UI FEED) ---
-            # Checks for SMT in either direction purely for the dashboard monitor
             is_monitoring_smt = False
             if asia_info and asia_info['is_closed']:
-                if current_price < asia_info['low']: # Potential Bullish SMT area
+                if current_price < asia_info['low']: # Potential Bullish SMT
                     is_monitoring_smt = check_smt_divergence(df, df_aux, "LOW")
-                elif current_price > asia_info['high']: # Potential Bearish SMT area
+                elif current_price > asia_info['high']: # Potential Bearish SMT
                     is_monitoring_smt = check_smt_divergence(df, df_aux, "HIGH")
             
             GLOBAL_STATE["market_data"]["smt_detected"] = is_monitoring_smt
@@ -377,7 +399,7 @@ async def root():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ForwardFin V3.7 | SMT Enabled</title>
+    <title>ForwardFin V3.8 | SMT Latch</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -420,14 +442,18 @@ async def root():
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-10">
                 <div class="space-y-6">
                     <div class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold uppercase tracking-wide">
-                        V3.7 LIVE: SMT DIVERGENCE (SAST)
+                        V3.8 LIVE: SMT LATCH
                     </div>
                     <h1 class="text-4xl sm:text-5xl font-extrabold text-slate-900 leading-tight">
                         Precision Entries,<br>
-                        <span class="text-sky-600">Smart Money Verified.</span>
+                        <span class="text-sky-600">Locked & Verified.</span>
                     </h1>
-                    <p class="text-lg text-slate-600 max-w-lg">
-                        The bot now tracks <strong>NQ vs ES correlation</strong>. It waits for one asset to sweep liquidity while the other fails (SMT), confirming institutional manipulation.
+                    <div class="flex items-center gap-2 mt-4 text-slate-500 font-mono text-sm">
+                        <span>🕒 BOT TIME (SAST):</span>
+                        <span id="server-clock" class="font-bold text-slate-800">--:--:--</span>
+                    </div>
+                    <p class="text-lg text-slate-600 max-w-lg mt-4">
+                        The bot now tracks <strong>NQ vs ES correlation</strong> and locks signals on the dashboard for 5 minutes so you never miss an alert.
                     </p>
                 </div>
                 <div class="grid grid-cols-3 gap-4">
@@ -544,7 +570,7 @@ async def root():
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-12">
                     <h2 class="text-3xl font-bold text-slate-900">ForwardFin Academy</h2>
-                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">V3.7 Concepts: SMT Divergence & Liquidity.</p>
+                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">V3.8 Concepts: SMT Divergence & Liquidity.</p>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[400px]">
                     <div class="lg:col-span-4 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden overflow-y-auto">
@@ -657,6 +683,11 @@ async def root():
                 document.getElementById('res-price').innerText = "$" + data.market_data.price.toLocaleString();
                 document.getElementById('res-bias').innerText = data.prediction.bias;
                 
+                // UPDATE CLOCK
+                if(data.market_data.server_time) {
+                     document.getElementById('server-clock').innerText = data.market_data.server_time;
+                }
+
                 // SMT Logic (UI Update)
                 const smtEl = document.getElementById('status-smt');
                 if(data.market_data.smt_detected) {
@@ -764,7 +795,7 @@ async def root():
     </script>
 </body>
 </html>
-""")
+                        """)
 
 if __name__ == "__main__":
     t1 = threading.Thread(target=run_market_data_stream, daemon=True)
