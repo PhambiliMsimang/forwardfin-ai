@@ -17,10 +17,14 @@ from pydantic import BaseModel
 # --- 🔧 CONFIGURATION ---
 DISCORD_WEBHOOK_URL = "https://discordapp.com/api/webhooks/1454098742218330307/gi8wvEn0pMcNsAWIR_kY5-_0_VE4CvsgWjkSXjCasXX-xUrydbhYtxHRLLLgiKxs_pLL"
 
-# PDF Rule: "Define Asia (03:00-08:59)"
-# INTERPRETATION: This is 03:00 SAST (South Africa Time).
+# 1. ASIA RANGE (Recording Phase) - 03:00 to 08:59 SAST
 ASIA_OPEN_TIME = dtime(3, 0)   
 ASIA_CLOSE_TIME = dtime(8, 59) 
+
+# 2. TRADING WINDOW (Execution Phase) - 09:00 to 21:00 SAST
+# The bot will ONLY send signals between these hours.
+TRADE_WINDOW_OPEN = dtime(9, 0)
+TRADE_WINDOW_CLOSE = dtime(21, 0) 
 
 # --- 🧠 GLOBAL STATE ---
 GLOBAL_STATE = {
@@ -32,7 +36,7 @@ GLOBAL_STATE = {
     "market_data": {
         "price": 0.00,
         "ifvg_detected": False, 
-        "smt_detected": False, # Global SMT Status for UI
+        "smt_detected": False, 
         "fib_status": "NEUTRAL",
         "session_high": 0.00,
         "session_low": 0.00,
@@ -41,18 +45,18 @@ GLOBAL_STATE = {
         "highs": [],
         "lows": [],
         "aux_data": {"NQ": None, "ES": None},
-        "server_time": "--:--:--" # NEW: For UI Clock
+        "server_time": "--:--:--" 
     },
     "prediction": {
         "bias": "NEUTRAL", 
         "probability": 50, 
-        "narrative": "V3.8.1 (SAST) System Initializing...",
+        "narrative": "V3.9 (Time-Gated) System Initializing...",
         "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "valid": False}
     },
     "performance": {"wins": 0, "total": 0, "win_rate": 0},
     "active_trades": [],
     "last_alert_time": 0,
-    "signal_latch": {"active": False, "data": None, "time": 0} # NEW: Ghost Signal Fix
+    "signal_latch": {"active": False, "data": None, "time": 0} 
 }
 
 app = FastAPI()
@@ -83,12 +87,11 @@ def send_discord_alert(data, asset):
                 {"name": "🛑 SL (Dynamic)", "value": f"${data['trade_setup']['sl']:,.2f}", "inline": True},
                 {"name": "Confidence", "value": f"{data['probability']}%", "inline": True}
             ],
-            "footer": {"text": f"ForwardFin V3.8.1 • SAST Logic • SMT Verified"}
+            "footer": {"text": f"ForwardFin V3.9 • SAST Trading Window • SMT Verified"}
         }
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
         GLOBAL_STATE["last_alert_time"] = time.time()
         
-        # ACTIVATE LATCH: Freeze this signal on the dashboard for 5 minutes
         GLOBAL_STATE["signal_latch"]["active"] = True
         GLOBAL_STATE["signal_latch"]["data"] = data
         GLOBAL_STATE["signal_latch"]["time"] = time.time()
@@ -114,7 +117,6 @@ def run_market_data_stream():
                 main_key, aux_key = "ES", "NQ"
 
             if not data.empty:
-                # --- TIMEZONE FIX (SAST) ---
                 sa_tz = pytz.timezone('Africa/Johannesburg')
                 
                 df_main = data[main_ticker].copy()
@@ -131,7 +133,7 @@ def run_market_data_stream():
                 current_time_str = datetime.now(sa_tz).strftime('%H:%M:%S')
                 
                 GLOBAL_STATE["market_data"]["price"] = current_price
-                GLOBAL_STATE["market_data"]["server_time"] = current_time_str # Update UI Clock
+                GLOBAL_STATE["market_data"]["server_time"] = current_time_str 
                 GLOBAL_STATE["market_data"]["history"] = df_main['Close'].tolist()[-100:]
                 GLOBAL_STATE["market_data"]["highs"] = df_main['High'].tolist()[-100:]
                 GLOBAL_STATE["market_data"]["lows"] = df_main['Low'].tolist()[-100:]
@@ -140,7 +142,7 @@ def run_market_data_stream():
                 GLOBAL_STATE["market_data"]["aux_data"][main_key] = df_main 
                 GLOBAL_STATE["market_data"]["aux_data"][aux_key] = df_aux_raw
                 
-                print(f"✅ TICK [{current_asset_symbol}]: ${current_price:,.2f} | SAST: {current_time_str}", flush=True)
+                print(f"✅ TICK [{current_asset_symbol}]: ${current_price:,.2f} | SAST Time: {current_time_str}", flush=True)
             
         except Exception as e:
             print(f"⚠️ Data Error: {e}", flush=True)
@@ -217,7 +219,7 @@ def get_recent_5m_swing(df_5m, bias):
 
 # --- WORKER 2: THE STRATEGY BRAIN ---
 def run_strategy_engine():
-    print("🧠 BRAIN THREAD: Asia SMT Protocol Loaded...", flush=True)
+    print("🧠 BRAIN THREAD: Asia SMT Protocol + Trading Window Loaded...", flush=True)
     while True:
         try:
             market = GLOBAL_STATE["market_data"]
@@ -233,17 +235,29 @@ def run_strategy_engine():
                 time.sleep(5)
                 continue
 
+            # --- TRADING WINDOW CHECK (FIX FOR LATE SIGNALS) ---
+            sa_tz = pytz.timezone('Africa/Johannesburg')
+            now_time = datetime.now(sa_tz).time()
+            
+            # If current time is OUTSIDE 09:00 - 21:00 SAST, Sleep.
+            if not (TRADE_WINDOW_OPEN <= now_time <= TRADE_WINDOW_CLOSE):
+                GLOBAL_STATE["prediction"] = {
+                    "bias": "CLOSED",
+                    "probability": 0,
+                    "narrative": f"😴 Market Closed. Trading Window: {TRADE_WINDOW_OPEN.strftime('%H:%M')} - {TRADE_WINDOW_CLOSE.strftime('%H:%M')} SAST.",
+                    "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "valid": False}
+                }
+                time.sleep(5)
+                continue # Skip all analysis logic
+
             # --- LATCH CHECK (GHOST SIGNAL FIX) ---
-            # If a signal fired recently, freeze the dashboard data
             latch = GLOBAL_STATE["signal_latch"]
             if latch["active"]:
                 if time.time() - latch["time"] < 300: # 5 Minute Hold
-                    # Overwrite current scanning data with the Latched Signal
                     GLOBAL_STATE["prediction"] = latch["data"]
                     time.sleep(1)
-                    continue # Skip the rest of the scan loop
+                    continue 
                 else:
-                    # Latch expired
                     GLOBAL_STATE["signal_latch"]["active"] = False
 
             # 1. PREP DATA
@@ -256,12 +270,11 @@ def run_strategy_engine():
             setup = {"entry": 0, "tp": 0, "sl": 0, "valid": False}
             
             # --- GLOBAL SMT MONITORING (UI FEED) ---
-            # Checks for SMT in either direction purely for the dashboard monitor
             is_monitoring_smt = False
             if asia_info and asia_info['is_closed']:
-                if current_price < asia_info['low']: # Potential Bullish SMT area
+                if current_price < asia_info['low']: 
                     is_monitoring_smt = check_smt_divergence(df, df_aux, "LOW")
-                elif current_price > asia_info['high']: # Potential Bearish SMT area
+                elif current_price > asia_info['high']: 
                     is_monitoring_smt = check_smt_divergence(df, df_aux, "HIGH")
             
             GLOBAL_STATE["market_data"]["smt_detected"] = is_monitoring_smt
@@ -400,7 +413,7 @@ async def root():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ForwardFin V3.8.1 | SMT Latch</title>
+    <title>ForwardFin V3.9 | SMT Latch</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -443,7 +456,7 @@ async def root():
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-10">
                 <div class="space-y-6">
                     <div class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold uppercase tracking-wide">
-                        V3.8.1 LIVE: SMT LATCH
+                        V3.9 LIVE: SMT LATCH + TIME GATE
                     </div>
                     <h1 class="text-4xl sm:text-5xl font-extrabold text-slate-900 leading-tight">
                         Precision Entries,<br>
@@ -454,7 +467,7 @@ async def root():
                         <span id="server-clock" class="font-bold text-slate-800">--:--:--</span>
                     </div>
                     <p class="text-lg text-slate-600 max-w-lg mt-4">
-                        The bot now tracks <strong>NQ vs ES correlation</strong> and locks signals on the dashboard for 5 minutes so you never miss an alert.
+                        The bot now tracks <strong>NQ vs ES correlation</strong>, locks signals for 5 minutes, and only hunts during the active day session (09:00 - 21:00).
                     </p>
                 </div>
                 <div class="grid grid-cols-3 gap-4">
@@ -571,7 +584,7 @@ async def root():
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-12">
                     <h2 class="text-3xl font-bold text-slate-900">ForwardFin Academy</h2>
-                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">V3.8 Concepts: SMT Divergence & Liquidity.</p>
+                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">V3.9 Concepts: SMT Divergence & Liquidity.</p>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[400px]">
                     <div class="lg:col-span-4 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden overflow-y-auto">
