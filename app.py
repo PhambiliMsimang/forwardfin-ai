@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import pytz 
-from datetime import datetime, time as dtime, timedelta
+from datetime import datetime, time as dtime
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,7 +32,7 @@ GLOBAL_STATE = {
     "market_data": {
         "price": 0.00,
         "ifvg_detected": False, 
-        "smt_detected": False, # Global SMT Status
+        "smt_detected": False, # Global SMT Status for UI
         "fib_status": "NEUTRAL",
         "session_high": 0.00,
         "session_low": 0.00,
@@ -41,12 +41,12 @@ GLOBAL_STATE = {
         "highs": [],
         "lows": [],
         "aux_data": {"NQ": None, "ES": None},
-        "server_time": "" # NEW: For UI Clock
+        "server_time": "--:--:--" # NEW: For UI Clock
     },
     "prediction": {
         "bias": "NEUTRAL", 
         "probability": 50, 
-        "narrative": "V3.8 (SAST) System Initializing...",
+        "narrative": "V3.8.1 (SAST) System Initializing...",
         "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "valid": False}
     },
     "performance": {"wins": 0, "total": 0, "win_rate": 0},
@@ -83,7 +83,7 @@ def send_discord_alert(data, asset):
                 {"name": "🛑 SL (Dynamic)", "value": f"${data['trade_setup']['sl']:,.2f}", "inline": True},
                 {"name": "Confidence", "value": f"{data['probability']}%", "inline": True}
             ],
-            "footer": {"text": f"ForwardFin V3.8 • SAST Logic • SMT Verified"}
+            "footer": {"text": f"ForwardFin V3.8.1 • SAST Logic • SMT Verified"}
         }
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
         GLOBAL_STATE["last_alert_time"] = time.time()
@@ -217,7 +217,7 @@ def get_recent_5m_swing(df_5m, bias):
 
 # --- WORKER 2: THE STRATEGY BRAIN ---
 def run_strategy_engine():
-    print("🧠 BRAIN THREAD: Asia SMT Protocol + Latch Loaded...", flush=True)
+    print("🧠 BRAIN THREAD: Asia SMT Protocol Loaded...", flush=True)
     while True:
         try:
             market = GLOBAL_STATE["market_data"]
@@ -232,7 +232,7 @@ def run_strategy_engine():
             if df is None or len(market["history"]) < 20: 
                 time.sleep(5)
                 continue
-            
+
             # --- LATCH CHECK (GHOST SIGNAL FIX) ---
             # If a signal fired recently, freeze the dashboard data
             latch = GLOBAL_STATE["signal_latch"]
@@ -256,11 +256,12 @@ def run_strategy_engine():
             setup = {"entry": 0, "tp": 0, "sl": 0, "valid": False}
             
             # --- GLOBAL SMT MONITORING (UI FEED) ---
+            # Checks for SMT in either direction purely for the dashboard monitor
             is_monitoring_smt = False
             if asia_info and asia_info['is_closed']:
-                if current_price < asia_info['low']: # Potential Bullish SMT
+                if current_price < asia_info['low']: # Potential Bullish SMT area
                     is_monitoring_smt = check_smt_divergence(df, df_aux, "LOW")
-                elif current_price > asia_info['high']: # Potential Bearish SMT
+                elif current_price > asia_info['high']: # Potential Bearish SMT area
                     is_monitoring_smt = check_smt_divergence(df, df_aux, "HIGH")
             
             GLOBAL_STATE["market_data"]["smt_detected"] = is_monitoring_smt
@@ -399,7 +400,7 @@ async def root():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ForwardFin V3.8 | SMT Latch</title>
+    <title>ForwardFin V3.8.1 | SMT Latch</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -442,7 +443,7 @@ async def root():
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-10">
                 <div class="space-y-6">
                     <div class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold uppercase tracking-wide">
-                        V3.8 LIVE: SMT LATCH
+                        V3.8.1 LIVE: SMT LATCH
                     </div>
                     <h1 class="text-4xl sm:text-5xl font-extrabold text-slate-900 leading-tight">
                         Precision Entries,<br>
