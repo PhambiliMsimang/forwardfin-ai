@@ -50,7 +50,7 @@ GLOBAL_STATE = {
     "prediction": {
         "bias": "NEUTRAL", 
         "probability": 50, 
-        "narrative": "V3.9 (Time-Gated) System Initializing...",
+        "narrative": "V3.9.1 System Initializing...",
         "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "valid": False}
     },
     "performance": {"wins": 0, "total": 0, "win_rate": 0},
@@ -87,7 +87,7 @@ def send_discord_alert(data, asset):
                 {"name": "🛑 SL (Dynamic)", "value": f"${data['trade_setup']['sl']:,.2f}", "inline": True},
                 {"name": "Confidence", "value": f"{data['probability']}%", "inline": True}
             ],
-            "footer": {"text": f"ForwardFin V3.9 • SAST Trading Window • SMT Verified"}
+            "footer": {"text": f"ForwardFin V3.9.1 • SAST Trading Window • SMT Verified"}
         }
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
         GLOBAL_STATE["last_alert_time"] = time.time()
@@ -107,7 +107,6 @@ def run_market_data_stream():
     while True:
         try:
             tickers = "NQ=F ES=F"
-            # Request valid data.
             data = yf.download(tickers, period="5d", interval="1m", progress=False, group_by='ticker')
             
             current_asset_symbol = GLOBAL_STATE["settings"]["asset"]
@@ -121,24 +120,22 @@ def run_market_data_stream():
             if not data.empty:
                 sa_tz = pytz.timezone('Africa/Johannesburg')
                 
-                # Process Main Asset
                 df_main = data[main_ticker].copy()
                 if df_main.index.tz is None: df_main.index = df_main.index.tz_localize('UTC')
                 df_main.index = df_main.index.tz_convert(sa_tz)
                 df_main = df_main.dropna()
 
-                # Process Aux Asset
                 df_aux_raw = data[aux_ticker].copy()
                 if df_aux_raw.index.tz is None: df_aux_raw.index = df_aux_raw.index.tz_localize('UTC')
                 df_aux_raw.index = df_aux_raw.index.tz_convert(sa_tz)
                 df_aux_raw = df_aux_raw.dropna()
                 
-                # --- STALE DATA CHECK (CRITICAL FIX) ---
+                # --- STALE DATA CHECK (RELAXED TO 20 MINS) ---
                 last_candle_time = df_main.index[-1]
                 now_time = datetime.now(sa_tz)
                 
-                # If data is older than 10 minutes, ignore it.
-                if (now_time - last_candle_time).seconds > 600:
+                # CHANGED 600 (10 mins) to 1200 (20 mins) to allow standard delay
+                if (now_time - last_candle_time).seconds > 1200:
                     print(f"⚠️ DATA LAG: Candle is from {last_candle_time.strftime('%H:%M')}. Current time {now_time.strftime('%H:%M')}. Skipping.", flush=True)
                     time.sleep(20)
                     continue
@@ -156,7 +153,7 @@ def run_market_data_stream():
                 GLOBAL_STATE["market_data"]["aux_data"][main_key] = df_main 
                 GLOBAL_STATE["market_data"]["aux_data"][aux_key] = df_aux_raw
                 
-                print(f"✅ TICK [{current_asset_symbol}]: ${current_price:,.2f} | SAST Time: {current_time_str}", flush=True)
+                print(f"✅ TICK [{current_asset_symbol}]: ${current_price:,.2f} | SAST: {current_time_str}", flush=True)
             
         except Exception as e:
             print(f"⚠️ Data Error: {e}", flush=True)
@@ -259,7 +256,7 @@ def run_strategy_engine():
                     "narrative": f"😴 Market Closed. Trading Window: {TRADE_WINDOW_OPEN.strftime('%H:%M')} - {TRADE_WINDOW_CLOSE.strftime('%H:%M')} SAST.",
                     "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "valid": False}
                 }
-                time.sleep(10)
+                time.sleep(5)
                 continue # Skip all analysis logic
 
             # --- LATCH CHECK (GHOST SIGNAL FIX) ---
@@ -425,7 +422,7 @@ async def root():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ForwardFin V3.9 | Time-Gated</title>
+    <title>ForwardFin V3.9.1 | Relaxed Guard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -468,7 +465,7 @@ async def root():
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-10">
                 <div class="space-y-6">
                     <div class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold uppercase tracking-wide">
-                        V3.9 LIVE: SMT LATCH + TIME GATE
+                        V3.9.1 LIVE: RELAXED GUARD
                     </div>
                     <h1 class="text-4xl sm:text-5xl font-extrabold text-slate-900 leading-tight">
                         Precision Entries,<br>
@@ -479,7 +476,7 @@ async def root():
                         <span id="server-clock" class="font-bold text-slate-800">--:--:--</span>
                     </div>
                     <p class="text-lg text-slate-600 max-w-lg mt-4">
-                        The bot now tracks <strong>NQ vs ES correlation</strong>, locks signals on the dashboard for 5 minutes, and only hunts during the active day session (09:00 - 21:00).
+                        The bot now tracks <strong>NQ vs ES correlation</strong> and locks signals on the dashboard for 5 minutes so you never miss an alert.
                     </p>
                 </div>
                 <div class="grid grid-cols-3 gap-4">
@@ -596,7 +593,7 @@ async def root():
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-12">
                     <h2 class="text-3xl font-bold text-slate-900">ForwardFin Academy</h2>
-                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">V3.9 Concepts: SMT Divergence & Liquidity.</p>
+                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">V3.9.1 Concepts: SMT Divergence & Liquidity.</p>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[400px]">
                     <div class="lg:col-span-4 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden overflow-y-auto">
