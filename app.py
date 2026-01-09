@@ -22,9 +22,12 @@ ASIA_OPEN_TIME = dtime(3, 0)
 ASIA_CLOSE_TIME = dtime(8, 59) 
 
 # 2. TRADING WINDOW (Execution Phase) - 09:00 to 21:00 SAST
-# The bot will STRICTLY only trade between these hours.
 TRADE_WINDOW_OPEN = dtime(9, 0)
 TRADE_WINDOW_CLOSE = dtime(21, 0) 
+
+# 3. CFD OFFSET (The "Mental Math" Fix)
+# Subtracts this amount from Yahoo Futures to match Capital.com
+FUTURES_OFFSET = 105.00
 
 # --- 🧠 GLOBAL STATE ---
 GLOBAL_STATE = {
@@ -35,6 +38,7 @@ GLOBAL_STATE = {
     },
     "market_data": {
         "price": 0.00,
+        "adjusted_price": 0.00, # New: CFD Price
         "ifvg_detected": False, 
         "smt_detected": False, 
         "fib_status": "NEUTRAL",
@@ -50,12 +54,14 @@ GLOBAL_STATE = {
     "prediction": {
         "bias": "NEUTRAL", 
         "probability": 50, 
-        "narrative": "V3.9.2 (Data Guard Disabled)...",
+        "narrative": "V4.0 (CFD Sync Active)...",
         "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "valid": False}
     },
     "performance": {"wins": 0, "total": 0, "win_rate": 0},
     "active_trades": [],
     "last_alert_time": 0,
+    "last_long_alert": 0,  # Anti-Spam Tracker
+    "last_short_alert": 0, # Anti-Spam Tracker
     "signal_latch": {"active": False, "data": None, "time": 0} 
 }
 
@@ -68,40 +74,63 @@ class SettingsUpdate(BaseModel):
     strategy: str
     style: str
 
-# --- 🔔 DISCORD ALERT SYSTEM ---
+# --- 🔔 DISCORD ALERT SYSTEM (Adjusted for CFDs) ---
 def send_discord_alert(data, asset):
-    if time.time() - GLOBAL_STATE["last_alert_time"] < 300: return
+    current_time = time.time()
+    bias = data['bias']
+
+    # --- ANTI-SPAM LOGIC (60 Minute Cooldown) ---
+    # Choice 2A: Stop the spam. Choice 3A: Allow re-tests later.
+    if bias == "LONG":
+        if current_time - GLOBAL_STATE["last_long_alert"] < 3600: return
+        GLOBAL_STATE["last_long_alert"] = current_time
+    elif bias == "SHORT":
+        if current_time - GLOBAL_STATE["last_short_alert"] < 3600: return
+        GLOBAL_STATE["last_short_alert"] = current_time
 
     try:
-        color = 5763719 if data['bias'] == "LONG" else 15548997
-        strategy_name = "ASIA EXECUTION PROTOCOL"
+        # APPLY OFFSET (No more mental math)
+        raw_entry = data['trade_setup']['entry']
+        raw_tp = data['trade_setup']['tp']
+        raw_sl = data['trade_setup']['sl']
+        
+        adj_entry = raw_entry - FUTURES_OFFSET
+        adj_tp = raw_tp - FUTURES_OFFSET
+        adj_sl = raw_sl - FUTURES_OFFSET
+
+        color = 5763719 if bias == "LONG" else 15548997
         style_icon = "🦁" 
         
         embed = {
-            "title": f"{style_icon} SIGNAL: {asset} {data['bias']}",
-            "description": f"**AI Reasoning:**\n{data['narrative']}",
+            "title": f"{style_icon} SIGNAL: {asset} {bias}",
+            "description": f"**AI Reasoning:**\n{data['narrative']}\n\n**⚠️ Prices Adjusted:** -{int(FUTURES_OFFSET)} pts to match CFD Chart.",
             "color": color,
             "fields": [
-                {"name": "Entry (1m Trigger)", "value": f"${data['trade_setup']['entry']:,.2f}", "inline": True},
-                {"name": "🎯 TP1 (5m Swing)", "value": f"${data['trade_setup']['tp']:,.2f}", "inline": True},
-                {"name": "🛑 SL (Dynamic)", "value": f"${data['trade_setup']['sl']:,.2f}", "inline": True},
+                {"name": "Entry (CFD)", "value": f"${adj_entry:,.2f}", "inline": True},
+                {"name": "🎯 TP (Asia)", "value": f"${adj_tp:,.2f}", "inline": True},
+                {"name": "🛑 SL (Swing)", "value": f"${adj_sl:,.2f}", "inline": True},
                 {"name": "Confidence", "value": f"{data['probability']}%", "inline": True}
             ],
-            "footer": {"text": f"ForwardFin V3.9.2 • Unblocked Data • SMT Verified"}
+            "footer": {"text": f"ForwardFin V4.0 • CFD Synced • Anti-Spam Active"}
         }
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
-        GLOBAL_STATE["last_alert_time"] = time.time()
+        GLOBAL_STATE["last_alert_time"] = current_time
         
-        # LATCH: Freeze UI for 5 mins
+        # Update Latch with Adjusted Data for UI
+        ui_data = data.copy()
+        ui_data['trade_setup']['entry'] = adj_entry
+        ui_data['trade_setup']['tp'] = adj_tp
+        ui_data['trade_setup']['sl'] = adj_sl
+
         GLOBAL_STATE["signal_latch"]["active"] = True
-        GLOBAL_STATE["signal_latch"]["data"] = data
-        GLOBAL_STATE["signal_latch"]["time"] = time.time()
+        GLOBAL_STATE["signal_latch"]["data"] = ui_data
+        GLOBAL_STATE["signal_latch"]["time"] = current_time
         
-        print("✅ Discord Alert Sent & Latch Activated!", flush=True)
+        print(f"✅ Alert Sent ({bias}): CFD Price ${adj_entry}", flush=True)
     except Exception as e:
         print(f"❌ Discord Error: {e}", flush=True)
 
-# --- WORKER 1: REAL FUTURES DATA (DUAL STREAM) ---
+# --- WORKER 1: REAL FUTURES DATA ---
 def run_market_data_stream():
     print("📡 DATA THREAD: Connecting to Dual Streams (NQ + ES)...", flush=True)
     while True:
@@ -130,18 +159,15 @@ def run_market_data_stream():
                 df_aux_raw.index = df_aux_raw.index.tz_convert(sa_tz)
                 df_aux_raw = df_aux_raw.dropna()
                 
-                # --- STALE DATA WARNING (NO BLOCK) ---
-                last_candle_time = df_main.index[-1]
-                now_time = datetime.now(sa_tz)
-                
-                # Just warn, DO NOT STOP (continue removed)
-                if (now_time - last_candle_time).seconds > 1200:
-                    print(f"⚠️ DATA LAG: Data is {int((now_time - last_candle_time).seconds/60)} mins old. Processing anyway.", flush=True)
-
+                # UNBLOCKED DATA
                 current_price = float(df_main['Close'].iloc[-1])
+                adjusted_price = current_price - FUTURES_OFFSET # CFD Price
+                
+                now_time = datetime.now(sa_tz)
                 current_time_str = now_time.strftime('%H:%M:%S')
                 
                 GLOBAL_STATE["market_data"]["price"] = current_price
+                GLOBAL_STATE["market_data"]["adjusted_price"] = adjusted_price
                 GLOBAL_STATE["market_data"]["server_time"] = current_time_str 
                 GLOBAL_STATE["market_data"]["history"] = df_main['Close'].tolist()[-100:]
                 GLOBAL_STATE["market_data"]["highs"] = df_main['High'].tolist()[-100:]
@@ -151,7 +177,7 @@ def run_market_data_stream():
                 GLOBAL_STATE["market_data"]["aux_data"][main_key] = df_main 
                 GLOBAL_STATE["market_data"]["aux_data"][aux_key] = df_aux_raw
                 
-                print(f"✅ TICK [{current_asset_symbol}]: ${current_price:,.2f} | SAST Time: {current_time_str}", flush=True)
+                print(f"✅ TICK: ${adjusted_price:,.2f} (CFD) | ${current_price:,.2f} (Fut)", flush=True)
             
         except Exception as e:
             print(f"⚠️ Data Error: {e}", flush=True)
@@ -226,11 +252,11 @@ def get_recent_5m_swing(df_5m, bias):
 
 # --- WORKER 2: THE STRATEGY BRAIN ---
 def run_strategy_engine():
-    print("🧠 BRAIN THREAD: V3.9.2 (Unblocked) Loaded...", flush=True)
+    print("🧠 BRAIN THREAD: V4.0 Logic Loaded...", flush=True)
     while True:
         try:
             market = GLOBAL_STATE["market_data"]
-            current_price = market["price"]
+            current_price = market["price"] # Analyze on Futures Price
             df = market["df"]
             
             # Retrieve Aux Data
@@ -246,7 +272,6 @@ def run_strategy_engine():
             sa_tz = pytz.timezone('Africa/Johannesburg')
             now_time = datetime.now(sa_tz).time()
             
-            # If current time is OUTSIDE 09:00 - 21:00 SAST, Sleep.
             if not (TRADE_WINDOW_OPEN <= now_time <= TRADE_WINDOW_CLOSE):
                 GLOBAL_STATE["prediction"] = {
                     "bias": "CLOSED",
@@ -311,7 +336,7 @@ def run_strategy_engine():
                             
                             if has_trigger:
                                 bias = "LONG"
-                                prob = 95 if has_smt else 85
+                                prob = 95 if has_smt else 85 # Choice 1B: Trade anyway but lower confidence
                                 tp1 = get_recent_5m_swing(df_5m, "LONG")
                                 tp2 = high 
                                 sl_dynamic = float(df['Low'].iloc[-5:].min()) 
@@ -341,7 +366,7 @@ def run_strategy_engine():
                             
                             if has_trigger:
                                 bias = "SHORT"
-                                prob = 95 if has_smt else 85
+                                prob = 95 if has_smt else 85 # Choice 1B
                                 tp1 = get_recent_5m_swing(df_5m, "SHORT")
                                 tp2 = low 
                                 sl_dynamic = float(df['High'].iloc[-5:].max()) 
@@ -371,6 +396,7 @@ def run_strategy_engine():
             threshold = 85 
             
             if prob >= threshold and bias != "NEUTRAL":
+                # Check 5 min window for double firing
                 if not any(t for t in GLOBAL_STATE["active_trades"] if time.time() - t['time'] < 300):
                     GLOBAL_STATE["active_trades"].append({
                         "type": bias, "entry": current_price, "time": time.time()
@@ -401,6 +427,11 @@ async def get_api():
     safe_state["market_data"] = GLOBAL_STATE["market_data"].copy()
     if "df" in safe_state["market_data"]: del safe_state["market_data"]["df"]
     if "aux_data" in safe_state["market_data"]: del safe_state["market_data"]["aux_data"]
+    
+    # UI FIX: Return adjusted price so Dashboard matches CFD
+    if safe_state["market_data"]["adjusted_price"] > 0:
+        safe_state["market_data"]["price"] = safe_state["market_data"]["adjusted_price"]
+        
     return safe_state
 
 @app.post("/api/update-settings")
@@ -420,7 +451,7 @@ async def root():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ForwardFin V3.9.2 | Unblocked</title>
+    <title>ForwardFin V4.0 | CFD Sync</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -463,18 +494,18 @@ async def root():
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-10">
                 <div class="space-y-6">
                     <div class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold uppercase tracking-wide">
-                        V3.9.2 LIVE: UNBLOCKED DATA
+                        V4.0 LIVE: CFD SYNC ACTIVE
                     </div>
                     <h1 class="text-4xl sm:text-5xl font-extrabold text-slate-900 leading-tight">
                         Precision Entries,<br>
-                        <span class="text-sky-600">Locked & Verified.</span>
+                        <span class="text-sky-600">Price Adjusted.</span>
                     </h1>
                     <div class="flex items-center gap-2 mt-4 text-slate-500 font-mono text-sm">
                         <span>🕒 BOT TIME (SAST):</span>
                         <span id="server-clock" class="font-bold text-slate-800">--:--:--</span>
                     </div>
                     <p class="text-lg text-slate-600 max-w-lg mt-4">
-                        The bot now tracks <strong>NQ vs ES correlation</strong> and locks signals on the dashboard for 5 minutes. <strong>Stale Data Guard is OFF</strong> to allow standard Yahoo Finance delay.
+                        The bot now tracks <strong>NQ vs ES correlation</strong>. Prices are automatically adjusted (-105 pts) to match your <strong>Capital.com CFD</strong> charts.
                     </p>
                 </div>
                 <div class="grid grid-cols-3 gap-4">
@@ -537,7 +568,7 @@ async def root():
                             
                             <div class="w-full md:w-1/3 flex flex-col gap-4">
                                 <div class="bg-slate-700/50 p-4 rounded-lg border border-slate-600">
-                                    <span class="text-xs text-slate-400 uppercase">Current Price</span>
+                                    <span class="text-xs text-slate-400 uppercase">Current Price (CFD)</span>
                                     <div id="res-price" class="text-3xl font-mono font-bold text-white mt-1">---</div>
                                 </div>
                                 <div class="bg-slate-700/50 p-4 rounded-lg border border-slate-600">
@@ -561,7 +592,7 @@ async def root():
                                     </div>
                                     <div class="grid grid-cols-3 gap-3 text-center">
                                         <div class="bg-slate-800 p-2 rounded border border-slate-600">
-                                            <div class="text-[10px] text-slate-400">ENTRY (1m)</div>
+                                            <div class="text-[10px] text-slate-400">ENTRY (CFD)</div>
                                             <div id="setup-entry" class="text-white font-bold">---</div>
                                         </div>
                                         <div class="bg-emerald-900/20 p-2 rounded border border-emerald-500/30">
@@ -591,7 +622,7 @@ async def root():
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-12">
                     <h2 class="text-3xl font-bold text-slate-900">ForwardFin Academy</h2>
-                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">V3.9.2 Concepts: SMT Divergence & Liquidity.</p>
+                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">V4.0 Concepts: SMT Divergence & Liquidity.</p>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[400px]">
                     <div class="lg:col-span-4 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden overflow-y-auto">
@@ -659,11 +690,6 @@ async def root():
 
     </main>
 
-    <footer class="bg-slate-900 text-slate-400 py-12 border-t border-slate-800 text-center">
-        <p class="text-sm mb-6">Democratizing financial intelligence.</p>
-        <div class="text-xs text-slate-600">&copy; 2026 ForwardFin. All rights reserved.</div>
-    </footer>
-
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script>
         // --- LIVE DASHBOARD UPDATES ---
@@ -706,7 +732,7 @@ async def root():
                 
                 // UPDATE CLOCK
                 if(data.market_data.server_time) {
-                     document.getElementById('server-clock').innerText = data.market_data.server_time;
+                      document.getElementById('server-clock').innerText = data.market_data.server_time;
                 }
 
                 // SMT Logic (UI Update)
@@ -724,10 +750,10 @@ async def root():
                 const sessionLow = data.market_data.session_low;
                 const sessionHigh = data.market_data.session_high;
                 if (sessionLow > 0) {
-                     fibEl.innerText = `${sessionLow} - ${sessionHigh}`;
-                     fibEl.className = "text-sm font-bold text-slate-800 mt-4 text-center";
+                      fibEl.innerText = `${sessionLow} - ${sessionHigh}`;
+                      fibEl.className = "text-sm font-bold text-slate-800 mt-4 text-center";
                 } else {
-                     fibEl.innerText = "WAITING FOR DATA";
+                      fibEl.innerText = "WAITING FOR DATA";
                 }
 
                 const prob = data.prediction.probability;
