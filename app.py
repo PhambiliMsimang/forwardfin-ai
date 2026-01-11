@@ -80,7 +80,6 @@ def send_discord_alert(data, asset):
     bias = data['bias']
 
     # --- ANTI-SPAM LOGIC (60 Minute Cooldown) ---
-    # Choice 2A: Stop the spam. Choice 3A: Allow re-tests later.
     if bias == "LONG":
         if current_time - GLOBAL_STATE["last_long_alert"] < 3600: return
         GLOBAL_STATE["last_long_alert"] = current_time
@@ -237,7 +236,7 @@ def detect_1m_trigger(df, trend_bias):
     if trend_bias == "LONG":
         if df['Low'].iloc[-2] > df['High'].iloc[-4]: is_fvg = True 
         if df['Close'].iloc[-1] > df['High'].iloc[-3]: is_bos = True
-            
+        
     elif trend_bias == "SHORT":
         if df['High'].iloc[-2] < df['Low'].iloc[-4]: is_fvg = True 
         if df['Close'].iloc[-1] < df['Low'].iloc[-3]: is_bos = True
@@ -323,11 +322,15 @@ def run_strategy_engine():
                     
                     # SCENARIO A: Asia LOW Swept -> Bullish
                     if current_price < low:
-                        stdv_2 = low - (leg_range * 1.0) 
-                        narrative = "⚠️ Asia Low Swept. Monitoring for -2.0 STDV."
+                        # CALC ZONE: 2.0 to 2.5
+                        stdv_2 = low - (leg_range * 2.0) 
+                        stdv_25 = low - (leg_range * 2.5) 
                         
-                        if current_price <= (stdv_2 * 1.001): 
-                            narrative = "🚨 KILL ZONE (-2.0 STDV). Checking SMT & Trigger..."
+                        narrative = "⚠️ Asia Low Swept. Monitoring for 2.0-2.5 STDV Zone."
+                        
+                        # CHECK IF INSIDE ZONE (Between 2.0 and 2.5)
+                        if stdv_25 <= current_price <= stdv_2:
+                            narrative = f"🚨 KILL ZONE (2.0-2.5). Price: {current_price:.2f}"
                             
                             has_smt = check_smt_divergence(df, df_aux, "LOW")
                             smt_text = "✅ SMT Divergence (High Confidence)" if has_smt else "⚠️ No SMT (Correlation)"
@@ -336,14 +339,14 @@ def run_strategy_engine():
                             
                             if has_trigger:
                                 bias = "LONG"
-                                prob = 95 if has_smt else 85 # Choice 1B: Trade anyway but lower confidence
+                                prob = 95 if has_smt else 85 
                                 tp1 = get_recent_5m_swing(df_5m, "LONG")
                                 tp2 = high 
                                 sl_dynamic = float(df['Low'].iloc[-5:].min()) 
                                 
                                 narrative = (
                                     f"✅ **EXECUTION SIGNAL (BUY)**\n"
-                                    f"• Logic: Price hit -2.0 STDV ({stdv_2:.2f})\n"
+                                    f"• Logic: Price in 2.0-2.5 STDV Zone\n"
                                     f"• SMT Status: {smt_text}\n"
                                     f"• Trigger: 1m BOS + FVG Detected"
                                 )
@@ -353,11 +356,15 @@ def run_strategy_engine():
 
                     # SCENARIO B: Asia HIGH Swept -> Bearish
                     elif current_price > high:
-                        stdv_2 = high + (leg_range * 1.0) 
-                        narrative = "⚠️ Asia High Swept. Monitoring for -2.0 STDV."
+                        # CALC ZONE: 2.0 to 2.5
+                        stdv_2 = high + (leg_range * 2.0) 
+                        stdv_25 = high + (leg_range * 2.5) 
+
+                        narrative = "⚠️ Asia High Swept. Monitoring for 2.0-2.5 STDV Zone."
                         
-                        if current_price >= (stdv_2 * 0.999):
-                            narrative = "🚨 KILL ZONE (-2.0 STDV). Checking SMT & Trigger..."
+                        # CHECK IF INSIDE ZONE (Between 2.0 and 2.5)
+                        if stdv_2 <= current_price <= stdv_25:
+                            narrative = f"🚨 KILL ZONE (2.0-2.5). Price: {current_price:.2f}"
                             
                             has_smt = check_smt_divergence(df, df_aux, "HIGH")
                             smt_text = "✅ SMT Divergence (High Confidence)" if has_smt else "⚠️ No SMT (Correlation)"
@@ -366,14 +373,14 @@ def run_strategy_engine():
                             
                             if has_trigger:
                                 bias = "SHORT"
-                                prob = 95 if has_smt else 85 # Choice 1B
+                                prob = 95 if has_smt else 85 
                                 tp1 = get_recent_5m_swing(df_5m, "SHORT")
                                 tp2 = low 
                                 sl_dynamic = float(df['High'].iloc[-5:].max()) 
                                 
                                 narrative = (
                                     f"✅ **EXECUTION SIGNAL (SELL)**\n"
-                                    f"• Logic: Price hit -2.0 STDV ({stdv_2:.2f})\n"
+                                    f"• Logic: Price in 2.0-2.5 STDV Zone\n"
                                     f"• SMT Status: {smt_text}\n"
                                     f"• Trigger: 1m BOS + FVG Detected"
                                 )
