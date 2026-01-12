@@ -21,9 +21,9 @@ DISCORD_WEBHOOK_URL = "https://discordapp.com/api/webhooks/1454098742218330307/g
 ASIA_OPEN_TIME = dtime(3, 0)   
 ASIA_CLOSE_TIME = dtime(8, 59) 
 
-# 2. TRADING WINDOW (Execution Phase) - 09:00 to 21:00 SAST
+# 2. TRADING WINDOW (Execution Phase) - 09:00 to 23:00 SAST
 TRADE_WINDOW_OPEN = dtime(9, 0)
-TRADE_WINDOW_CLOSE = dtime(21, 0) 
+TRADE_WINDOW_CLOSE = dtime(23, 0) 
 
 # 3. CFD OFFSET (The "Mental Math" Fix)
 # Subtracts this amount from Yahoo Futures to match Capital.com
