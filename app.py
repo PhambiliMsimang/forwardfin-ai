@@ -79,12 +79,13 @@ def send_discord_alert(data, asset):
     current_time = time.time()
     bias = data['bias']
 
-    # --- ANTI-SPAM LOGIC (60 Minute Cooldown) ---
+    # --- ANTI-SPAM LOGIC (15 Minute Cooldown) ---
+    # UPDATED: Changed to 900 seconds (15 mins)
     if bias == "LONG":
-        if current_time - GLOBAL_STATE["last_long_alert"] < 3600: return
+        if current_time - GLOBAL_STATE["last_long_alert"] < 900: return
         GLOBAL_STATE["last_long_alert"] = current_time
     elif bias == "SHORT":
-        if current_time - GLOBAL_STATE["last_short_alert"] < 3600: return
+        if current_time - GLOBAL_STATE["last_short_alert"] < 900: return
         GLOBAL_STATE["last_short_alert"] = current_time
 
     try:
