@@ -17,28 +17,30 @@ from pydantic import BaseModel
 # --- 🔧 CONFIGURATION ---
 DISCORD_WEBHOOK_URL = "https://discordapp.com/api/webhooks/1454098742218330307/gi8wvEn0pMcNsAWIR_kY5-_0_VE4CvsgWjkSXjCasXX-xUrydbhYtxHRLLLgiKxs_pLL"
 
-# 1. ASIA RANGE (Recording Phase) - 03:00 to 08:59 SAST
+# 1. ASIA RANGE
 ASIA_OPEN_TIME = dtime(3, 0)   
 ASIA_CLOSE_TIME = dtime(8, 59) 
 
-# 2. TRADING WINDOW (Execution Phase) - 09:00 to 23:00 SAST
+# 2. TRADING WINDOW
 TRADE_WINDOW_OPEN = dtime(9, 0)
 TRADE_WINDOW_CLOSE = dtime(23, 0) 
 
-# 3. CFD OFFSET (The "Mental Math" Fix)
-# Subtracts this amount from Yahoo Futures to match Capital.com
-FUTURES_OFFSET = 105.00
+# 3. DANGER WORDS (News Filter)
+DANGER_KEYWORDS = ["CPI", "PPI", "FED", "POWELL", "HIKE", "INFLATION", "RATES", "FOMC", "NFP", "JOBS"]
 
 # --- 🧠 GLOBAL STATE ---
 GLOBAL_STATE = {
     "settings": {
-        "asset": "NQ1!",       # NQ1! (Nasdaq) or ES1! (S&P 500)
+        "asset": "NQ1!",       
         "strategy": "SWEEP",   
-        "style": "SNIPER"      
+        "style": "SNIPER",
+        "offset": 105.0,        # Dynamic Offset
+        "balance": 1000.0,      # Risk Calc
+        "risk_pct": 2.0         # Risk Calc
     },
     "market_data": {
         "price": 0.00,
-        "adjusted_price": 0.00, # New: CFD Price
+        "adjusted_price": 0.00, 
         "ifvg_detected": False, 
         "smt_detected": False, 
         "fib_status": "NEUTRAL",
@@ -51,17 +53,23 @@ GLOBAL_STATE = {
         "aux_data": {"NQ": None, "ES": None},
         "server_time": "--:--:--" 
     },
+    "news": {                   # News State
+        "is_danger": False,
+        "headline": "No Active Threats",
+        "last_scan": "Not scanned yet"
+    },
     "prediction": {
         "bias": "NEUTRAL", 
         "probability": 50, 
-        "narrative": "V4.0 (CFD Sync Active)...",
-        "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "valid": False}
+        "narrative": "V4.2 Initializing...",
+        "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "size": 0, "valid": False}
     },
     "performance": {"wins": 0, "total": 0, "win_rate": 0},
+    "logs": [],                 # Terminal Logs
     "active_trades": [],
     "last_alert_time": 0,
-    "last_long_alert": 0,  # Anti-Spam Tracker
-    "last_short_alert": 0, # Anti-Spam Tracker
+    "last_long_alert": 0,  
+    "last_short_alert": 0, 
     "signal_latch": {"active": False, "data": None, "time": 0} 
 }
 
@@ -69,77 +77,158 @@ app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 analyzer = SentimentIntensityAnalyzer()
 
+# --- API MODELS ---
 class SettingsUpdate(BaseModel):
     asset: str
     strategy: str
     style: str
 
-# --- 🔔 DISCORD ALERT SYSTEM (Adjusted for CFDs) ---
+class CalibrationUpdate(BaseModel):
+    current_cfd_price: float
+
+class RiskUpdate(BaseModel):
+    balance: float
+    risk_pct: float
+
+# --- 📝 LOGGING SYSTEM ---
+def log_msg(type, text):
+    timestamp = datetime.now(pytz.timezone('Africa/Johannesburg')).strftime('%H:%M:%S')
+    icon = "ℹ️"
+    if type == "TRADE": icon = "🦁"
+    elif type == "ALERT": icon = "🚨"
+    elif type == "NEWS": icon = "📰"
+    elif type == "SYS": icon = "⚙️"
+    
+    log_entry = f"[{timestamp}] {icon} {text}"
+    GLOBAL_STATE["logs"].insert(0, log_entry)
+    if len(GLOBAL_STATE["logs"]) > 50: GLOBAL_STATE["logs"].pop()
+    print(log_entry, flush=True)
+
+# --- 🧮 RISK CALCULATOR ---
+def calculate_position_size(entry, sl):
+    try:
+        balance = GLOBAL_STATE["settings"]["balance"]
+        risk_pct = GLOBAL_STATE["settings"]["risk_pct"]
+        risk_amount = balance * (risk_pct / 100)
+        
+        stop_loss_dist = abs(entry - sl)
+        if stop_loss_dist < 1: stop_loss_dist = 1 
+        
+        # Standard Contract: $1 per point (Capital.com US100)
+        position_size = risk_amount / stop_loss_dist
+        return round(position_size, 2), round(risk_amount, 2)
+    except:
+        return 0, 0
+
+# --- 🔔 DISCORD ALERT SYSTEM ---
 def send_discord_alert(data, asset):
     current_time = time.time()
     bias = data['bias']
 
-    # --- ANTI-SPAM LOGIC (15 Minute Cooldown) ---
-    # UPDATED: Changed to 900 seconds (15 mins)
+    # 30 Minute Cooldown
     if bias == "LONG":
-        if current_time - GLOBAL_STATE["last_long_alert"] < 900: return
+        if current_time - GLOBAL_STATE["last_long_alert"] < 1800: return
         GLOBAL_STATE["last_long_alert"] = current_time
     elif bias == "SHORT":
-        if current_time - GLOBAL_STATE["last_short_alert"] < 900: return
+        if current_time - GLOBAL_STATE["last_short_alert"] < 1800: return
         GLOBAL_STATE["last_short_alert"] = current_time
 
     try:
-        # APPLY OFFSET (No more mental math)
+        current_offset = GLOBAL_STATE["settings"]["offset"]
+        
         raw_entry = data['trade_setup']['entry']
         raw_tp = data['trade_setup']['tp']
         raw_sl = data['trade_setup']['sl']
         
-        adj_entry = raw_entry - FUTURES_OFFSET
-        adj_tp = raw_tp - FUTURES_OFFSET
-        adj_sl = raw_sl - FUTURES_OFFSET
+        # Apply Dynamic Offset
+        adj_entry = raw_entry - current_offset
+        adj_tp = raw_tp - current_offset
+        adj_sl = raw_sl - current_offset
+
+        # Calculate Risk
+        lots, risk_usd = calculate_position_size(adj_entry, adj_sl)
+        GLOBAL_STATE["prediction"]["trade_setup"]["size"] = lots
 
         color = 5763719 if bias == "LONG" else 15548997
         style_icon = "🦁" 
         
         embed = {
             "title": f"{style_icon} SIGNAL: {asset} {bias}",
-            "description": f"**AI Reasoning:**\n{data['narrative']}\n\n**⚠️ Prices Adjusted:** -{int(FUTURES_OFFSET)} pts to match CFD Chart.",
+            "description": f"**AI Reasoning:**\n{data['narrative']}\n\n**⚙️ Offset:** -{int(current_offset)} pts",
             "color": color,
             "fields": [
                 {"name": "Entry (CFD)", "value": f"${adj_entry:,.2f}", "inline": True},
-                {"name": "🎯 TP (Asia)", "value": f"${adj_tp:,.2f}", "inline": True},
                 {"name": "🛑 SL (Swing)", "value": f"${adj_sl:,.2f}", "inline": True},
+                {"name": "🎯 TP (Asia)", "value": f"${adj_tp:,.2f}", "inline": True},
+                {"name": "⚖️ Risk Calc", "value": f"Risk: ${risk_usd} ({GLOBAL_STATE['settings']['risk_pct']}%)\n**Size: {lots} Lots**", "inline": False},
                 {"name": "Confidence", "value": f"{data['probability']}%", "inline": True}
             ],
-            "footer": {"text": f"ForwardFin V4.0 • CFD Synced • Anti-Spam Active"}
+            "footer": {"text": f"ForwardFin V4.2 • Risk Engine Active"}
         }
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
         GLOBAL_STATE["last_alert_time"] = current_time
         
-        # Update Latch with Adjusted Data for UI
+        # Update Latch
         ui_data = data.copy()
         ui_data['trade_setup']['entry'] = adj_entry
         ui_data['trade_setup']['tp'] = adj_tp
         ui_data['trade_setup']['sl'] = adj_sl
-
         GLOBAL_STATE["signal_latch"]["active"] = True
         GLOBAL_STATE["signal_latch"]["data"] = ui_data
         GLOBAL_STATE["signal_latch"]["time"] = current_time
         
-        print(f"✅ Alert Sent ({bias}): CFD Price ${adj_entry}", flush=True)
+        log_msg("ALERT", f"Sent {bias} Signal. Target: {lots} Lots.")
     except Exception as e:
-        print(f"❌ Discord Error: {e}", flush=True)
+        log_msg("SYS", f"Discord Error: {e}")
+
+# --- 📰 NEWS SCANNER ---
+def check_news():
+    try:
+        ticker = yf.Ticker("NQ=F")
+        news_items = ticker.news
+        found_danger = False
+        danger_word = ""
+        
+        if news_items:
+            latest = news_items[0]
+            title = latest['title'].upper()
+            pub_time = latest.get('providerPublishTime', 0)
+            
+            # Check if news is < 2 hours old
+            if time.time() - pub_time < 7200:
+                for word in DANGER_KEYWORDS:
+                    if word in title:
+                        found_danger = True
+                        danger_word = word
+                        break
+            
+            status_msg = f"Last: {title[:30]}..."
+            if found_danger:
+                status_msg = f"⛔ DANGER: '{danger_word}' detected!"
+                log_msg("NEWS", f"Trading PAUSED. Detected: {danger_word}")
+            
+            GLOBAL_STATE["news"] = {
+                "is_danger": found_danger,
+                "headline": status_msg,
+                "last_scan": datetime.now().strftime('%H:%M')
+            }
+    except Exception as e:
+        print(f"News Error: {e}")
 
 # --- WORKER 1: REAL FUTURES DATA ---
 def run_market_data_stream():
-    print("📡 DATA THREAD: Connecting to Dual Streams (NQ + ES)...", flush=True)
+    log_msg("SYS", "Connecting to Dual Streams (NQ + ES)...")
+    tick_count = 0
     while True:
         try:
             tickers = "NQ=F ES=F"
             data = yf.download(tickers, period="5d", interval="1m", progress=False, group_by='ticker')
             
-            current_asset_symbol = GLOBAL_STATE["settings"]["asset"]
-            if current_asset_symbol == "NQ1!":
+            # Check news every 5 mins (approx 30 ticks)
+            if tick_count % 30 == 0: check_news()
+            tick_count += 1
+
+            if GLOBAL_STATE["settings"]["asset"] == "NQ1!":
                 main_ticker, aux_ticker = "NQ=F", "ES=F"
                 main_key, aux_key = "NQ", "ES"
             else:
@@ -148,60 +237,42 @@ def run_market_data_stream():
 
             if not data.empty:
                 sa_tz = pytz.timezone('Africa/Johannesburg')
-                
                 df_main = data[main_ticker].copy()
-                if df_main.index.tz is None: df_main.index = df_main.index.tz_localize('UTC')
-                df_main.index = df_main.index.tz_convert(sa_tz)
+                df_main.index = df_main.index.tz_convert(sa_tz) if df_main.index.tz else df_main.index.tz_localize('UTC').tz_convert(sa_tz)
                 df_main = df_main.dropna()
 
-                df_aux_raw = data[aux_ticker].copy()
-                if df_aux_raw.index.tz is None: df_aux_raw.index = df_aux_raw.index.tz_localize('UTC')
-                df_aux_raw.index = df_aux_raw.index.tz_convert(sa_tz)
-                df_aux_raw = df_aux_raw.dropna()
+                df_aux = data[aux_ticker].copy()
+                df_aux.index = df_aux.index.tz_convert(sa_tz) if df_aux.index.tz else df_aux.index.tz_localize('UTC').tz_convert(sa_tz)
+                df_aux = df_aux.dropna()
                 
-                # UNBLOCKED DATA
                 current_price = float(df_main['Close'].iloc[-1])
-                adjusted_price = current_price - FUTURES_OFFSET # CFD Price
+                # Dynamic Offset
+                adjusted_price = current_price - GLOBAL_STATE["settings"]["offset"]
                 
                 now_time = datetime.now(sa_tz)
-                current_time_str = now_time.strftime('%H:%M:%S')
-                
                 GLOBAL_STATE["market_data"]["price"] = current_price
                 GLOBAL_STATE["market_data"]["adjusted_price"] = adjusted_price
-                GLOBAL_STATE["market_data"]["server_time"] = current_time_str 
+                GLOBAL_STATE["market_data"]["server_time"] = now_time.strftime('%H:%M:%S')
                 GLOBAL_STATE["market_data"]["history"] = df_main['Close'].tolist()[-100:]
                 GLOBAL_STATE["market_data"]["highs"] = df_main['High'].tolist()[-100:]
                 GLOBAL_STATE["market_data"]["lows"] = df_main['Low'].tolist()[-100:]
                 GLOBAL_STATE["market_data"]["df"] = df_main
-                
                 GLOBAL_STATE["market_data"]["aux_data"][main_key] = df_main 
-                GLOBAL_STATE["market_data"]["aux_data"][aux_key] = df_aux_raw
+                GLOBAL_STATE["market_data"]["aux_data"][aux_key] = df_aux
                 
-                print(f"✅ TICK: ${adjusted_price:,.2f} (CFD) | ${current_price:,.2f} (Fut)", flush=True)
-            
         except Exception as e:
-            print(f"⚠️ Data Error: {e}", flush=True)
+            print(f"Data Error: {e}")
         time.sleep(10)
 
 # --- HELPER: DATA PROCESSING ---
 def get_asia_session_data(df):
     if df is None or df.empty: return None
-    
     last_timestamp = df.index[-1]
     current_date = last_timestamp.date()
-
-    mask = (df.index.time >= ASIA_OPEN_TIME) & \
-           (df.index.time <= ASIA_CLOSE_TIME) & \
-           (df.index.date == current_date)
-           
+    mask = (df.index.time >= ASIA_OPEN_TIME) & (df.index.time <= ASIA_CLOSE_TIME) & (df.index.date == current_date)
     session_data = df.loc[mask]
     if session_data.empty: return None
-
-    return {
-        "high": float(session_data['High'].max()),
-        "low": float(session_data['Low'].min()),
-        "is_closed": last_timestamp.time() > ASIA_CLOSE_TIME
-    }
+    return {"high": float(session_data['High'].max()), "low": float(session_data['Low'].min()), "is_closed": last_timestamp.time() > ASIA_CLOSE_TIME}
 
 def resample_to_5m(df):
     ohlc_dict = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last'}
@@ -211,21 +282,13 @@ def resample_to_5m(df):
 # --- HELPER: SMT DIVERGENCE CHECK ---
 def check_smt_divergence(main_df, aux_df, sweep_type):
     if aux_df is None or main_df is None: return False
-    
     common_index = main_df.index.intersection(aux_df.index)
     aux_synced = aux_df.loc[common_index]
-    
     aux_asia = get_asia_session_data(aux_synced)
     if not aux_asia or not aux_asia['is_closed']: return False
-    
     current_aux_price = aux_synced['Close'].iloc[-1]
-    
-    if sweep_type == "LOW": 
-        if current_aux_price > aux_asia['low']: return True 
-            
-    elif sweep_type == "HIGH": 
-        if current_aux_price < aux_asia['high']: return True 
-            
+    if sweep_type == "LOW" and current_aux_price > aux_asia['low']: return True 
+    elif sweep_type == "HIGH" and current_aux_price < aux_asia['high']: return True 
     return False 
 
 # --- HELPER: 1-MINUTE EXECUTION TRIGGERS ---
@@ -233,18 +296,15 @@ def detect_1m_trigger(df, trend_bias):
     if len(df) < 5: return False
     is_fvg = False
     is_bos = False
-    
     if trend_bias == "LONG":
         if df['Low'].iloc[-2] > df['High'].iloc[-4]: is_fvg = True 
         if df['Close'].iloc[-1] > df['High'].iloc[-3]: is_bos = True
-        
     elif trend_bias == "SHORT":
         if df['High'].iloc[-2] < df['Low'].iloc[-4]: is_fvg = True 
         if df['Close'].iloc[-1] < df['Low'].iloc[-3]: is_bos = True
-            
     return is_fvg and is_bos
 
-# --- HELPER: 5M SWING DETECTION (For TP1) ---
+# --- HELPER: 5M SWING DETECTION ---
 def get_recent_5m_swing(df_5m, bias):
     if len(df_5m) < 10: return 0
     if bias == "LONG": return float(df_5m['High'].iloc[-10:].max())
@@ -252,26 +312,22 @@ def get_recent_5m_swing(df_5m, bias):
 
 # --- WORKER 2: THE STRATEGY BRAIN ---
 def run_strategy_engine():
-    print("🧠 BRAIN THREAD: V4.0 Logic Loaded...", flush=True)
+    log_msg("SYS", "V4.2 Logic Loaded. 2.5 SD + Risk Engine Active.")
     while True:
         try:
             market = GLOBAL_STATE["market_data"]
-            current_price = market["price"] # Analyze on Futures Price
+            current_price = market["price"]
             df = market["df"]
-            
-            # Retrieve Aux Data
             current_asset = GLOBAL_STATE["settings"]["asset"]
             aux_key = "ES" if current_asset == "NQ1!" else "NQ"
             df_aux = market["aux_data"].get(aux_key)
 
             if df is None or len(market["history"]) < 20: 
-                time.sleep(5)
-                continue
+                time.sleep(5); continue
 
-            # --- TRADING WINDOW CHECK ---
+            # Time Gate
             sa_tz = pytz.timezone('Africa/Johannesburg')
             now_time = datetime.now(sa_tz).time()
-            
             if not (TRADE_WINDOW_OPEN <= now_time <= TRADE_WINDOW_CLOSE):
                 GLOBAL_STATE["prediction"] = {
                     "bias": "CLOSED",
@@ -279,29 +335,23 @@ def run_strategy_engine():
                     "narrative": f"😴 Market Closed. Trading Window: {TRADE_WINDOW_OPEN.strftime('%H:%M')} - {TRADE_WINDOW_CLOSE.strftime('%H:%M')} SAST.",
                     "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "valid": False}
                 }
-                time.sleep(5)
-                continue 
+                time.sleep(5); continue 
 
-            # --- LATCH CHECK ---
-            latch = GLOBAL_STATE["signal_latch"]
-            if latch["active"]:
-                if time.time() - latch["time"] < 300: # 5 Minute Hold
-                    GLOBAL_STATE["prediction"] = latch["data"]
-                    time.sleep(1)
-                    continue 
-                else:
-                    GLOBAL_STATE["signal_latch"]["active"] = False
+            # NEWS BLOCK
+            if GLOBAL_STATE["news"]["is_danger"]:
+                GLOBAL_STATE["prediction"]["bias"] = "PAUSED"
+                GLOBAL_STATE["prediction"]["narrative"] = f"⛔ TRADING HALTED.\nNews Event: {GLOBAL_STATE['news']['headline']}"
+                time.sleep(5); continue
 
-            # 1. PREP DATA
+            # Analysis
             asia_info = get_asia_session_data(df)
             df_5m = resample_to_5m(df) 
             
             bias = "NEUTRAL"
             prob = 50
-            narrative = "Scanning Market Structure (SAST)..."
-            setup = {"entry": 0, "tp": 0, "sl": 0, "valid": False}
+            narrative = "Scanning..."
+            setup = {"entry": 0, "tp": 0, "sl": 0, "size": 0, "valid": False}
             
-            # --- GLOBAL SMT MONITORING ---
             is_monitoring_smt = False
             if asia_info and asia_info['is_closed']:
                 if current_price < asia_info['low']: 
@@ -317,99 +367,49 @@ def run_strategy_engine():
                 GLOBAL_STATE["market_data"]["session_high"] = high
                 GLOBAL_STATE["market_data"]["session_low"] = low
 
-                # --- PHASE 1: ANALYSIS MODE (5m) ---
                 if asia_info['is_closed']: 
                     leg_range = high - low
                     
-                    # SCENARIO A: Asia LOW Swept -> Bullish
+                    # 2.5 SD LOGIC (UPDATED)
+                    buy_zone = low - (leg_range * 2.5)
+                    sell_zone = high + (leg_range * 2.5)
+
                     if current_price < low:
-                        # CALC ZONE: 2.0 to 2.5
-                        stdv_2 = low - (leg_range * 2.0) 
-                        stdv_25 = low - (leg_range * 2.5) 
-                        
-                        narrative = "⚠️ Asia Low Swept. Monitoring for 2.0-2.5 STDV Zone."
-                        
-                        # CHECK IF INSIDE ZONE (Between 2.0 and 2.5)
-                        if stdv_25 <= current_price <= stdv_2:
-                            narrative = f"🚨 KILL ZONE (2.0-2.5). Price: {current_price:.2f}"
-                            
+                        narrative = "⚠️ Low Swept. Monitoring for 2.5 SD."
+                        if current_price <= (buy_zone * 1.001): 
+                            narrative = "🚨 KILL ZONE (2.5 SD). Checking Trigger..."
                             has_smt = check_smt_divergence(df, df_aux, "LOW")
-                            smt_text = "✅ SMT Divergence (High Confidence)" if has_smt else "⚠️ No SMT (Correlation)"
-                            
-                            has_trigger = detect_1m_trigger(df, "LONG")
-                            
-                            if has_trigger:
+                            if detect_1m_trigger(df, "LONG"):
                                 bias = "LONG"
                                 prob = 95 if has_smt else 85 
                                 tp1 = get_recent_5m_swing(df_5m, "LONG")
                                 tp2 = high 
                                 sl_dynamic = float(df['Low'].iloc[-5:].min()) 
-                                
-                                narrative = (
-                                    f"✅ **EXECUTION SIGNAL (BUY)**\n"
-                                    f"• Logic: Price in 2.0-2.5 STDV Zone\n"
-                                    f"• SMT Status: {smt_text}\n"
-                                    f"• Trigger: 1m BOS + FVG Detected"
-                                )
+                                narrative = "✅ BUY SIGNAL (2.5 SD Reversal)"
+                                if not has_smt: narrative += " (No SMT)"
                                 setup = {"entry": current_price, "tp": tp2, "sl": sl_dynamic, "valid": True}
-                            else:
-                                narrative += f"\n⏳ Waiting for 1m BOS+FVG. ({smt_text})"
 
-                    # SCENARIO B: Asia HIGH Swept -> Bearish
                     elif current_price > high:
-                        # CALC ZONE: 2.0 to 2.5
-                        stdv_2 = high + (leg_range * 2.0) 
-                        stdv_25 = high + (leg_range * 2.5) 
-
-                        narrative = "⚠️ Asia High Swept. Monitoring for 2.0-2.5 STDV Zone."
-                        
-                        # CHECK IF INSIDE ZONE (Between 2.0 and 2.5)
-                        if stdv_2 <= current_price <= stdv_25:
-                            narrative = f"🚨 KILL ZONE (2.0-2.5). Price: {current_price:.2f}"
-                            
+                        narrative = "⚠️ High Swept. Monitoring for 2.5 SD."
+                        if current_price >= (sell_zone * 0.999):
+                            narrative = "🚨 KILL ZONE (2.5 SD). Checking Trigger..."
                             has_smt = check_smt_divergence(df, df_aux, "HIGH")
-                            smt_text = "✅ SMT Divergence (High Confidence)" if has_smt else "⚠️ No SMT (Correlation)"
-                            
-                            has_trigger = detect_1m_trigger(df, "SHORT")
-                            
-                            if has_trigger:
+                            if detect_1m_trigger(df, "SHORT"):
                                 bias = "SHORT"
                                 prob = 95 if has_smt else 85 
                                 tp1 = get_recent_5m_swing(df_5m, "SHORT")
                                 tp2 = low 
                                 sl_dynamic = float(df['High'].iloc[-5:].max()) 
-                                
-                                narrative = (
-                                    f"✅ **EXECUTION SIGNAL (SELL)**\n"
-                                    f"• Logic: Price in 2.0-2.5 STDV Zone\n"
-                                    f"• SMT Status: {smt_text}\n"
-                                    f"• Trigger: 1m BOS + FVG Detected"
-                                )
+                                narrative = "✅ SELL SIGNAL (2.5 SD Reversal)"
+                                if not has_smt: narrative += " (No SMT)"
                                 setup = {"entry": current_price, "tp": tp2, "sl": sl_dynamic, "valid": True}
-                            else:
-                                narrative += f"\n⏳ Waiting for 1m BOS+FVG. ({smt_text})"
-                    else:
-                        narrative = f"Consolidating inside Asia Range ({low:.2f} - {high:.2f})."
-                else:
-                    narrative = "⏳ Asia Session Active (03:00-08:59 SAST)."
-            else:
-                narrative = "WAITING: No Asia Session Data found."
 
-            GLOBAL_STATE["prediction"] = {
-                "bias": bias, "probability": prob, "narrative": narrative, "trade_setup": setup
-            }
+            GLOBAL_STATE["prediction"] = {"bias": bias, "probability": prob, "narrative": narrative, "trade_setup": setup}
 
-            # --- EXECUTION & ALERTING ---
-            settings = GLOBAL_STATE["settings"]
-            threshold = 85 
-            
-            if prob >= threshold and bias != "NEUTRAL":
-                # Check 5 min window for double firing
+            if bias != "NEUTRAL":
                 if not any(t for t in GLOBAL_STATE["active_trades"] if time.time() - t['time'] < 300):
-                    GLOBAL_STATE["active_trades"].append({
-                        "type": bias, "entry": current_price, "time": time.time()
-                    })
-                    send_discord_alert(GLOBAL_STATE["prediction"], settings["asset"])
+                    GLOBAL_STATE["active_trades"].append({"type": bias, "entry": current_price, "time": time.time()})
+                    send_discord_alert(GLOBAL_STATE["prediction"], GLOBAL_STATE["settings"]["asset"])
 
             # Grading
             for trade in GLOBAL_STATE["active_trades"][:]:
@@ -425,7 +425,7 @@ def run_strategy_engine():
             GLOBAL_STATE["performance"]["win_rate"] = int((wins/total)*100) if total > 0 else 0
 
         except Exception as e:
-            print(f"❌ Brain Error: {e}", flush=True)
+            log_msg("SYS", f"Brain Error: {e}")
         time.sleep(1)
 
 # --- API ROUTES ---
@@ -436,7 +436,6 @@ async def get_api():
     if "df" in safe_state["market_data"]: del safe_state["market_data"]["df"]
     if "aux_data" in safe_state["market_data"]: del safe_state["market_data"]["aux_data"]
     
-    # UI FIX: Return adjusted price so Dashboard matches CFD
     if safe_state["market_data"]["adjusted_price"] > 0:
         safe_state["market_data"]["price"] = safe_state["market_data"]["adjusted_price"]
         
@@ -449,7 +448,25 @@ async def update_settings(settings: SettingsUpdate):
     GLOBAL_STATE["settings"]["style"] = settings.style
     GLOBAL_STATE["market_data"]["df"] = None
     GLOBAL_STATE["market_data"]["history"] = [] 
+    log_msg("SYS", f"Settings Updated: {settings.asset}")
     return {"status": "success"}
+
+@app.post("/api/calibrate-offset") # NEW
+async def calibrate(c: CalibrationUpdate):
+    futures_price = GLOBAL_STATE["market_data"]["price"] 
+    if futures_price > 0:
+        new_offset = futures_price - c.current_cfd_price
+        GLOBAL_STATE["settings"]["offset"] = new_offset
+        log_msg("SYS", f"⚖️ Calibrated! Offset: {new_offset:.2f}")
+        return {"status": "ok", "offset": new_offset}
+    return {"status": "error"}
+
+@app.post("/api/update-risk") # NEW
+async def update_risk(r: RiskUpdate):
+    GLOBAL_STATE["settings"]["balance"] = r.balance
+    GLOBAL_STATE["settings"]["risk_pct"] = r.risk_pct
+    log_msg("SYS", f"⚖️ Risk Updated: ${r.balance} @ {r.risk_pct}%")
+    return {"status": "ok"}
 
 @app.get("/")
 async def root():
@@ -459,90 +476,169 @@ async def root():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ForwardFin V4.0 | CFD Sync</title>
+    <title>ForwardFin V4.2 | Glass Box</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; color: #334155; }
+        body { font-family: 'Inter', sans-serif; background-color: #0B1120; color: #E2E8F0; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .terminal { background: #000; color: #00ff41; font-family: 'JetBrains Mono', monospace; font-size: 12px; height: 150px; overflow-y: auto; }
         .arch-layer { transition: all 0.3s ease; cursor: pointer; border-left: 4px solid transparent; }
-        .arch-layer:hover { background-color: #f1f5f9; transform: translateX(4px); }
-        .arch-layer.active { background-color: #e0f2fe; border-left-color: #0284c7; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .arch-layer:hover { background-color: rgba(255,255,255,0.05); transform: translateX(4px); }
+        .arch-layer.active { background-color: rgba(14, 165, 233, 0.2); border-left-color: #0ea5e9; }
         .lesson-card { cursor: pointer; transition: all 0.2s; border-left: 4px solid transparent; }
-        .lesson-card:hover { background: #f1f5f9; }
-        .lesson-card.active { background: #e0f2fe; border-left-color: #0284c7; }
-        .btn-asset { transition: all 0.2s; border: 1px solid #e2e8f0; }
-        .btn-asset:hover { background-color: #f1f5f9; border-color: #0284c7; }
-        .btn-asset.active { background-color: #0284c7; color: white; border-color: #0284c7; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .lesson-card:hover { background: rgba(255,255,255,0.05); }
+        .lesson-card.active { background: rgba(14, 165, 233, 0.2); border-left-color: #0ea5e9; }
+        .btn-asset { transition: all 0.2s; border: 1px solid #334155; }
+        .btn-asset:hover { background-color: #1e293b; border-color: #0ea5e9; }
+        .btn-asset.active { background-color: #0ea5e9; color: white; border-color: #0ea5e9; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-800 antialiased flex flex-col min-h-screen">
+<body class="bg-slate-900 text-slate-200 antialiased flex flex-col min-h-screen">
 
-    <nav class="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-200 shadow-sm">
+    <nav class="sticky top-0 z-50 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 shadow-sm">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16 items-center">
                 <div class="flex items-center gap-4">
-                    <div class="h-10 w-10 bg-slate-900 rounded-lg flex items-center justify-center text-white font-bold text-xl">FF</div>
-                    <div class="hidden md:block h-6 w-px bg-slate-300"></div>
-                    <div id="nav-ticker" class="font-mono text-sm font-bold text-slate-600 flex items-center gap-2">
+                    <div class="h-10 w-10 bg-sky-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">FF</div>
+                    <div class="hidden md:block h-6 w-px bg-slate-700"></div>
+                    <div id="nav-ticker" class="font-mono text-sm font-bold text-slate-400 flex items-center gap-2">
                         <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                         Connecting...
                     </div>
                 </div>
-                <div class="flex gap-2">
-                    <button onclick="setAsset('NQ1!')" id="btn-nq" class="btn-asset active px-4 py-1.5 rounded text-sm font-bold bg-white text-slate-600">NQ</button>
-                    <button onclick="setAsset('ES1!')" id="btn-es" class="btn-asset px-4 py-1.5 rounded text-sm font-bold bg-white text-slate-600">ES</button>
+                <div class="flex gap-4 items-center">
+                    <div id="news-status" class="hidden md:block text-xs px-3 py-1 rounded bg-slate-800 border border-slate-700 text-slate-400">
+                        📰 News Scanner: Active
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="setAsset('NQ1!')" id="btn-nq" class="btn-asset active px-4 py-1.5 rounded text-sm font-bold bg-slate-800 text-slate-300">NQ</button>
+                        <button onclick="setAsset('ES1!')" id="btn-es" class="btn-asset px-4 py-1.5 rounded text-sm font-bold bg-slate-800 text-slate-300">ES</button>
+                    </div>
                 </div>
             </div>
         </div>
     </nav>
 
-    <main class="flex-grow">
-        <section id="overview" class="pt-20 pb-10 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-10">
-                <div class="space-y-6">
-                    <div class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold uppercase tracking-wide">
-                        V4.0 LIVE: CFD SYNC ACTIVE
+    <main class="flex-grow p-4 md:p-8">
+        
+        <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 mb-12">
+            
+            <div class="lg:col-span-3 space-y-6">
+                <div class="glass rounded-xl p-5">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase mb-3">1. Calibrate Price</h3>
+                    <div class="space-y-2">
+                        <label class="text-xs text-slate-500">Capital.com Price</label>
+                        <input type="number" id="inp-cfd" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white text-sm focus:border-sky-500 outline-none" placeholder="e.g. 15400.50">
+                        <button onclick="calibrate()" class="w-full bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold py-2 rounded transition">SYNC OFFSET</button>
                     </div>
-                    <h1 class="text-4xl sm:text-5xl font-extrabold text-slate-900 leading-tight">
-                        Precision Entries,<br>
-                        <span class="text-sky-600">Price Adjusted.</span>
-                    </h1>
-                    <div class="flex items-center gap-2 mt-4 text-slate-500 font-mono text-sm">
-                        <span>🕒 BOT TIME (SAST):</span>
-                        <span id="server-clock" class="font-bold text-slate-800">--:--:--</span>
-                    </div>
-                    <p class="text-lg text-slate-600 max-w-lg mt-4">
-                        The bot now tracks <strong>NQ vs ES correlation</strong>. Prices are automatically adjusted (-105 pts) to match your <strong>Capital.com CFD</strong> charts.
-                    </p>
                 </div>
-                <div class="grid grid-cols-3 gap-4">
-                    <div class="bg-white p-4 rounded-2xl shadow-lg border border-slate-100 flex flex-col items-center">
-                        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Correlation Monitor</h3>
-                        <div id="status-smt" class="text-xl font-black text-rose-500 mt-4">SYNCED</div>
-                    </div>
-                    <div class="bg-white p-4 rounded-2xl shadow-lg border border-slate-100 flex flex-col items-center">
-                        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Session Range</h3>
-                        <div id="status-fib" class="text-sm font-black text-slate-800 mt-4 text-center">WAITING</div>
-                    </div>
-                    <div class="bg-white p-4 rounded-2xl shadow-lg border border-slate-100 flex flex-col items-center justify-center">
-                        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Win Rate</h3>
-                        <div class="text-center my-2"><span id="win-rate" class="text-4xl font-black text-slate-800">0%</span></div>
-                        <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden mt-1 mb-2"><div id="win-bar" class="bg-slate-800 h-full w-0 transition-all duration-1000"></div></div>
+
+                <div class="glass rounded-xl p-5">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase mb-3">2. Risk Engine</h3>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="text-xs text-slate-500">Balance ($)</label>
+                            <input type="number" id="inp-bal" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white text-sm outline-none" value="1000">
+                        </div>
+                        <div>
+                            <label class="text-xs text-slate-500">Risk %</label>
+                            <input type="number" id="inp-risk" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white text-sm outline-none" value="2.0">
+                        </div>
+                        <button onclick="updateRisk()" class="w-full bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold py-2 rounded transition">UPDATE RISK</button>
                     </div>
                 </div>
             </div>
 
-            <div class="bg-white p-6 rounded-2xl shadow-lg border border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="lg:col-span-6 space-y-6">
+                <div class="glass rounded-xl overflow-hidden flex flex-col h-[200px]">
+                    <div class="bg-slate-800/50 px-4 py-2 border-b border-white/5 flex justify-between">
+                        <span class="text-xs font-bold text-slate-400">SYSTEM LOGS</span>
+                        <span class="text-[10px] text-emerald-500 mono">● LIVE</span>
+                    </div>
+                    <div id="terminal" class="terminal p-4 space-y-1">
+                        <div class="opacity-50">Loading ForwardFin Core...</div>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="glass rounded-xl p-4 text-center">
+                        <div class="text-xs font-bold text-slate-500 uppercase">Live Price (CFD)</div>
+                        <div id="price-display" class="text-3xl font-bold text-white mt-1 font-mono">---</div>
+                    </div>
+                    <div class="glass rounded-xl p-4 text-center">
+                        <div class="text-xs font-bold text-slate-500 uppercase">Current Offset</div>
+                        <div id="stat-offset" class="text-3xl font-bold text-sky-500 mt-1 font-mono">-105</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-3 space-y-6">
+                <div class="glass rounded-xl p-5 flex flex-col h-64">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase mb-3 flex items-center gap-2">
+                        <span>🤖</span> AI Analysis
+                    </h3>
+                    <div id="ai-text" class="text-sm text-slate-300 leading-relaxed overflow-y-auto flex-grow pr-2">
+                        Waiting for market data...
+                    </div>
+                </div>
+
+                <div class="glass rounded-xl p-6 text-center">
+                    <div class="text-xs font-bold text-slate-500 uppercase mb-2">AI Signal</div>
+                    <div id="signal-badge" class="inline-block px-4 py-2 bg-slate-800 rounded text-sm font-bold text-slate-400">NEUTRAL</div>
+                </div>
+            </div>
+        </div>
+
+        <section id="overview" class="py-10 max-w-7xl mx-auto border-t border-slate-800">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-10">
+                <div class="space-y-6">
+                    <div class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-900/30 text-emerald-400 text-xs font-semibold uppercase tracking-wide border border-emerald-800">
+                        V4.2 LIVE: GLASS BOX MODE
+                    </div>
+                    <h1 class="text-4xl sm:text-5xl font-extrabold text-white leading-tight">
+                        Precision Entries,<br>
+                        <span class="text-sky-500">Fully Controlled.</span>
+                    </h1>
+                    <div class="flex items-center gap-2 mt-4 text-slate-500 font-mono text-sm">
+                        <span>🕒 BOT TIME (SAST):</span>
+                        <span id="server-clock" class="font-bold text-slate-300">--:--:--</span>
+                    </div>
+                    <p class="text-lg text-slate-400 max-w-lg mt-4">
+                        The bot tracks <strong>NQ vs ES correlation</strong> with a <strong>2.5 SD Target</strong>. Use the Control Deck above to calibrate prices and manage risk in real-time.
+                    </p>
+                </div>
+                <div class="grid grid-cols-3 gap-4">
+                    <div class="glass p-4 rounded-2xl flex flex-col items-center">
+                        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Correlation Monitor</h3>
+                        <div id="status-smt" class="text-xl font-black text-rose-500 mt-4">SYNCED</div>
+                    </div>
+                    <div class="glass p-4 rounded-2xl flex flex-col items-center">
+                        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Session Range</h3>
+                        <div id="status-fib" class="text-sm font-black text-slate-300 mt-4 text-center">WAITING</div>
+                    </div>
+                    <div class="glass p-4 rounded-2xl flex flex-col items-center justify-center">
+                        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Win Rate</h3>
+                        <div class="text-center my-2"><span id="win-rate" class="text-4xl font-black text-white">0%</span></div>
+                        <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden mt-1 mb-2"><div id="win-bar" class="bg-slate-200 h-full w-0 transition-all duration-1000"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="glass p-6 rounded-2xl grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                     <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Strategy Logic</label>
-                    <select id="sel-strategy" onchange="pushSettings()" class="w-full mt-2 bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-sky-500 focus:border-sky-500 block p-2.5">
+                    <select id="sel-strategy" onchange="pushSettings()" class="w-full mt-2 bg-slate-800 border border-slate-700 text-white text-sm rounded-lg block p-2.5">
                         <option value="SWEEP" selected>Asia Liquidity Sweep (Strict)</option>
                     </select>
                 </div>
                 <div>
                     <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Trade Style</label>
-                    <select id="sel-style" onchange="pushSettings()" class="w-full mt-2 bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-sky-500 focus:border-sky-500 block p-2.5">
+                    <select id="sel-style" onchange="pushSettings()" class="w-full mt-2 bg-slate-800 border border-slate-700 text-white text-sm rounded-lg block p-2.5">
                         <option value="SNIPER" selected>🎯 Sniper (High Probability)</option>
                         <option value="SCALP">⚡ Scalp (Fast Execution)</option>
                     </select>
@@ -626,30 +722,30 @@ async def root():
             </div>
         </section>
 
-        <section id="academy" class="py-16 bg-white border-t border-slate-200">
+        <section id="academy" class="py-16 bg-slate-900 border-t border-slate-800">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-12">
-                    <h2 class="text-3xl font-bold text-slate-900">ForwardFin Academy</h2>
-                    <p class="mt-4 text-slate-600 max-w-2xl mx-auto">V4.0 Concepts: SMT Divergence & Liquidity.</p>
+                    <h2 class="text-3xl font-bold text-white">ForwardFin Academy</h2>
+                    <p class="mt-4 text-slate-400 max-w-2xl mx-auto">V4.2 Concepts: SMT Divergence & Liquidity.</p>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[400px]">
-                    <div class="lg:col-span-4 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden overflow-y-auto">
-                        <div onclick="loadLesson(0)" class="lesson-card p-4 border-b border-slate-200 active">
-                            <h4 class="font-bold text-slate-800">1. SMT Divergence</h4>
+                    <div class="lg:col-span-4 glass rounded-xl overflow-hidden overflow-y-auto">
+                        <div onclick="loadLesson(0)" class="lesson-card p-4 border-b border-slate-700 active">
+                            <h4 class="font-bold text-slate-200">1. SMT Divergence</h4>
                             <p class="text-xs text-slate-500 mt-1">Correlation Check.</p>
                         </div>
-                        <div onclick="loadLesson(1)" class="lesson-card p-4 border-b border-slate-200">
-                            <h4 class="font-bold text-slate-800">2. The "Kill Zone"</h4>
-                            <p class="text-xs text-slate-500 mt-1">Wait for -2.0 STDV.</p>
+                        <div onclick="loadLesson(1)" class="lesson-card p-4 border-b border-slate-700">
+                            <h4 class="font-bold text-slate-200">2. The "Kill Zone"</h4>
+                            <p class="text-xs text-slate-500 mt-1">Wait for 2.5 SD.</p>
                         </div>
-                        <div onclick="loadLesson(2)" class="lesson-card p-4 border-b border-slate-200">
-                            <h4 class="font-bold text-slate-800">3. 1-Minute Trigger</h4>
+                        <div onclick="loadLesson(2)" class="lesson-card p-4 border-b border-slate-700">
+                            <h4 class="font-bold text-slate-200">3. 1-Minute Trigger</h4>
                             <p class="text-xs text-slate-500 mt-1">BOS + FVG Required.</p>
                         </div>
                     </div>
-                    <div class="lg:col-span-8 bg-white border border-slate-200 rounded-xl p-8 flex flex-col shadow-sm">
-                        <h3 id="lesson-title" class="text-2xl font-bold text-sky-600 mb-4">Select a Lesson</h3>
-                        <div id="lesson-body" class="text-slate-600 leading-relaxed mb-8 flex-grow overflow-y-auto">
+                    <div class="lg:col-span-8 glass rounded-xl p-8 flex flex-col shadow-sm">
+                        <h3 id="lesson-title" class="text-2xl font-bold text-sky-500 mb-4">Select a Lesson</h3>
+                        <div id="lesson-body" class="text-slate-300 leading-relaxed mb-8 flex-grow overflow-y-auto">
                             Click a module on the left to start learning.
                         </div>
                     </div>
@@ -657,38 +753,38 @@ async def root():
             </div>
         </section>
 
-        <section id="architecture" class="py-16 bg-slate-50 border-t border-slate-200">
+        <section id="architecture" class="py-16 bg-slate-900 border-t border-slate-800">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="mb-10">
-                    <h2 class="text-3xl font-bold text-slate-900">System Architecture</h2>
-                    <p class="mt-4 text-slate-600 max-w-3xl">ForwardFin is built on a modular 5-layer stack.</p>
+                    <h2 class="text-3xl font-bold text-white">System Architecture</h2>
+                    <p class="mt-4 text-slate-400 max-w-3xl">ForwardFin is built on a modular 5-layer stack.</p>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
                     <div class="lg:col-span-5 space-y-3">
-                        <div onclick="selectLayer(0)" class="arch-layer active bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
-                            <div><h4 class="font-bold text-slate-800">1. Data Ingestion</h4><p class="text-xs text-slate-500 mt-1">Yahoo Finance (yfinance)</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
+                        <div onclick="selectLayer(0)" class="arch-layer active glass p-4 rounded-lg flex items-center justify-between group">
+                            <div><h4 class="font-bold text-slate-200">1. Data Ingestion</h4><p class="text-xs text-slate-500 mt-1">Yahoo Finance (yfinance)</p></div><div class="text-slate-500 group-hover:text-sky-500">→</div>
                         </div>
-                        <div onclick="selectLayer(1)" class="arch-layer bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
-                            <div><h4 class="font-bold text-slate-800">2. Analysis Engine</h4><p class="text-xs text-slate-500 mt-1">Pandas / NumPy / SMT Logic</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
+                        <div onclick="selectLayer(1)" class="arch-layer glass p-4 rounded-lg flex items-center justify-between group">
+                            <div><h4 class="font-bold text-slate-200">2. Analysis Engine</h4><p class="text-xs text-slate-500 mt-1">Pandas / NumPy / SMT Logic</p></div><div class="text-slate-500 group-hover:text-sky-500">→</div>
                         </div>
-                        <div onclick="selectLayer(2)" class="arch-layer bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
-                            <div><h4 class="font-bold text-slate-800">3. Strategy Core</h4><p class="text-xs text-slate-500 mt-1">Asia Sweep -> SMT -> 1m Trigger</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
+                        <div onclick="selectLayer(2)" class="arch-layer glass p-4 rounded-lg flex items-center justify-between group">
+                            <div><h4 class="font-bold text-slate-200">3. Strategy Core</h4><p class="text-xs text-slate-500 mt-1">Asia Sweep -> SMT -> 1m Trigger</p></div><div class="text-slate-500 group-hover:text-sky-500">→</div>
                         </div>
-                        <div onclick="selectLayer(3)" class="arch-layer bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
-                            <div><h4 class="font-bold text-slate-800">4. Alerting Layer</h4><p class="text-xs text-slate-500 mt-1">Discord Webhooks</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
+                        <div onclick="selectLayer(3)" class="arch-layer glass p-4 rounded-lg flex items-center justify-between group">
+                            <div><h4 class="font-bold text-slate-200">4. Alerting Layer</h4><p class="text-xs text-slate-500 mt-1">Discord Webhooks</p></div><div class="text-slate-500 group-hover:text-sky-500">→</div>
                         </div>
-                        <div onclick="selectLayer(4)" class="arch-layer bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between group">
-                            <div><h4 class="font-bold text-slate-800">5. User Interface</h4><p class="text-xs text-slate-500 mt-1">FastAPI / Tailwind / JS</p></div><div class="text-slate-300 group-hover:text-sky-500">→</div>
+                        <div onclick="selectLayer(4)" class="arch-layer glass p-4 rounded-lg flex items-center justify-between group">
+                            <div><h4 class="font-bold text-slate-200">5. User Interface</h4><p class="text-xs text-slate-500 mt-1">FastAPI / Tailwind / JS</p></div><div class="text-slate-500 group-hover:text-sky-500">→</div>
                         </div>
                     </div>
                     <div class="lg:col-span-7">
-                        <div class="bg-white rounded-xl shadow-lg border border-slate-200 h-full p-6 flex flex-col">
-                            <div class="flex justify-between items-center mb-4 border-b border-slate-100 pb-4">
-                                <h3 id="detail-title" class="text-xl font-bold text-slate-800">Data Ingestion</h3>
-                                <span id="detail-badge" class="px-2 py-1 bg-sky-100 text-sky-700 text-xs rounded font-mono">Infrastructure</span>
+                        <div class="glass rounded-xl h-full p-6 flex flex-col">
+                            <div class="flex justify-between items-center mb-4 border-b border-slate-700 pb-4">
+                                <h3 id="detail-title" class="text-xl font-bold text-white">Data Ingestion</h3>
+                                <span id="detail-badge" class="px-2 py-1 bg-sky-900 text-sky-200 text-xs rounded font-mono">Infrastructure</span>
                             </div>
-                            <p id="detail-desc" class="text-slate-600 mb-6 flex-grow">Connects to Yahoo Finance to fetch real-time 1-minute candle data for NQ=F and ES=F futures contracts.</p>
-                            <h5 class="font-semibold text-slate-800 mb-3 text-sm uppercase">Tech Stack</h5>
+                            <p id="detail-desc" class="text-slate-300 mb-6 flex-grow">Connects to Yahoo Finance to fetch real-time 1-minute candle data for NQ=F and ES=F futures contracts.</p>
+                            <h5 class="font-semibold text-slate-400 mb-3 text-sm uppercase">Tech Stack</h5>
                             <ul id="detail-list" class="space-y-3"></ul>
                         </div>
                     </div>
@@ -700,20 +796,26 @@ async def root():
 
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script>
-        // --- LIVE DASHBOARD UPDATES ---
-        let widget = null;
-        let currentAsset = "NQ1!";
-
-        function initChart(symbol) {
-            const tvSymbol = symbol === "NQ1!" ? "CAPITALCOM:US100" : "CAPITALCOM:US500";
-            if(widget) { widget = null; document.getElementById('tradingview_chart').innerHTML = ""; }
-            widget = new TradingView.widget({ "autosize": true, "symbol": tvSymbol, "interval": "1", "timezone": "Africa/Johannesburg", "theme": "dark", "style": "1", "locale": "en", "toolbar_bg": "#f1f3f6", "enable_publishing": false, "hide_side_toolbar": false, "allow_symbol_change": false, "container_id": "tradingview_chart" });
-        }
+        // Init Chart
+        new TradingView.widget({
+            "autosize": true,
+            "symbol": "CAPITALCOM:US100",
+            "interval": "1",
+            "timezone": "Africa/Johannesburg",
+            "theme": "dark",
+            "style": "1",
+            "locale": "en",
+            "toolbar_bg": "#f1f3f6",
+            "enable_publishing": false,
+            "hide_side_toolbar": false,
+            "allow_symbol_change": false,
+            "container_id": "tradingview_chart"
+        });
 
         async function setAsset(asset) {
             currentAsset = asset;
-            document.getElementById('btn-nq').className = asset === "NQ1!" ? "btn-asset active px-4 py-1.5 rounded text-sm font-bold bg-white text-slate-600" : "btn-asset px-4 py-1.5 rounded text-sm font-bold bg-white text-slate-600";
-            document.getElementById('btn-es').className = asset === "ES1!" ? "btn-asset active px-4 py-1.5 rounded text-sm font-bold bg-white text-slate-600" : "btn-asset px-4 py-1.5 rounded text-sm font-bold bg-white text-slate-600";
+            document.getElementById('btn-nq').className = asset === "NQ1!" ? "btn-asset active px-4 py-1.5 rounded text-sm font-bold bg-slate-800 text-slate-300" : "btn-asset px-4 py-1.5 rounded text-sm font-bold bg-slate-800 text-slate-300";
+            document.getElementById('btn-es').className = asset === "ES1!" ? "btn-asset active px-4 py-1.5 rounded text-sm font-bold bg-slate-800 text-slate-300" : "btn-asset px-4 py-1.5 rounded text-sm font-bold bg-slate-800 text-slate-300";
             document.getElementById('lbl-asset').innerText = asset;
             pushSettings(); 
             initChart(asset);
@@ -729,28 +831,65 @@ async def root():
             });
         }
 
+        // --- API & UI LOGIC (NEW) ---
+        async function calibrate() {
+            const val = document.getElementById('inp-cfd').value;
+            if(!val) return;
+            const res = await fetch('/api/calibrate-offset', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ current_cfd_price: parseFloat(val) })
+            });
+        }
+
+        async function updateRisk() {
+            const bal = document.getElementById('inp-bal').value;
+            const risk = document.getElementById('inp-risk').value;
+            await fetch('/api/update-risk', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ balance: parseFloat(bal), risk_pct: parseFloat(risk) })
+            });
+        }
+
         async function updateDashboard() {
             try {
                 const res = await fetch('/api/live-data');
                 const data = await res.json();
                 
+                // Top Bar
                 document.getElementById('nav-ticker').innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> ${data.settings.asset}: $${data.market_data.price.toLocaleString()}`;
-                document.getElementById('res-price').innerText = "$" + data.market_data.price.toLocaleString();
-                document.getElementById('res-bias').innerText = data.prediction.bias;
-                
-                // UPDATE CLOCK
-                if(data.market_data.server_time) {
-                      document.getElementById('server-clock').innerText = data.market_data.server_time;
+                if(data.market_data.server_time) document.getElementById('server-clock').innerText = data.market_data.server_time;
+
+                // News
+                const newsEl = document.getElementById('news-status');
+                if(data.news.is_danger) {
+                    newsEl.className = "text-xs px-3 py-1 rounded bg-red-900/50 border border-red-500 text-red-200 animate-pulse";
+                    newsEl.innerText = "⛔ NEWS HALT: " + data.news.headline;
+                } else {
+                    newsEl.className = "text-xs px-3 py-1 rounded bg-slate-800 border border-slate-700 text-slate-400";
+                    newsEl.innerText = "📰 News: Clear";
                 }
 
-                // SMT Logic (UI Update)
+                // Stats & Terminal
+                document.getElementById('stat-offset').innerText = data.settings.offset.toFixed(2);
+                document.getElementById('price-display').innerText = "$" + data.market_data.price.toLocaleString(undefined, {minimumFractionDigits: 2});
+                const term = document.getElementById('terminal');
+                if(data.logs.length > 0) term.innerHTML = data.logs.map(l => `<div>${l}</div>`).join('');
+
+                // Signal & AI
+                const sigEl = document.getElementById('signal-badge');
+                sigEl.innerText = data.prediction.bias;
+                if(data.prediction.bias === "LONG") sigEl.className = "inline-block mt-3 px-3 py-1 bg-emerald-600 rounded text-xs font-bold text-white animate-pulse";
+                else if(data.prediction.bias === "SHORT") sigEl.className = "inline-block mt-3 px-3 py-1 bg-rose-600 rounded text-xs font-bold text-white animate-pulse";
+                else sigEl.className = "inline-block mt-3 px-3 py-1 bg-slate-800 rounded text-xs font-bold text-slate-400";
+                
+                document.getElementById('ai-text').innerText = data.prediction.narrative;
+
+                // SMT Logic
                 const smtEl = document.getElementById('status-smt');
                 if(data.market_data.smt_detected) {
-                    smtEl.innerText = "DIVERGENCE";
-                    smtEl.className = "text-xl font-black text-emerald-500 mt-4 animate-pulse";
+                    smtEl.innerText = "DIVERGENCE"; smtEl.className = "text-xl font-black text-emerald-500 mt-4 animate-pulse";
                 } else {
-                    smtEl.innerText = "SYNCED";
-                    smtEl.className = "text-xl font-black text-rose-500 mt-4";
+                    smtEl.innerText = "SYNCED"; smtEl.className = "text-xl font-black text-rose-500 mt-4";
                 }
 
                 // Session Status
@@ -759,7 +898,7 @@ async def root():
                 const sessionHigh = data.market_data.session_high;
                 if (sessionLow > 0) {
                       fibEl.innerText = `${sessionLow} - ${sessionHigh}`;
-                      fibEl.className = "text-sm font-bold text-slate-800 mt-4 text-center";
+                      fibEl.className = "text-sm font-bold text-slate-300 mt-4 text-center";
                 } else {
                       fibEl.innerText = "WAITING FOR DATA";
                 }
@@ -767,7 +906,6 @@ async def root():
                 const prob = data.prediction.probability;
                 document.getElementById('res-prob').innerText = prob + "%";
                 document.getElementById('prob-bar').style.width = prob + "%";
-                document.getElementById('res-reason').innerText = data.prediction.narrative;
                 
                  // Setup
                 const setup = data.prediction.trade_setup;
@@ -791,15 +929,15 @@ async def root():
             } catch (e) { console.log(e); }
         }
         
-        // --- 3. ACADEMY INTERACTIVITY (EXPANDED CONTEXT) ---
+        // --- 3. ACADEMY INTERACTIVITY (RESTORED) ---
         const lessons = [
             {
                 title: "1. SMT Divergence",
                 body: "<b>Smart Money Technique (SMT):</b> This is our 'Lie Detector'. Institutional algorithms often manipulate one index (like NQ) to grab liquidity while holding the other (like ES) steady.<br><br><b>The Rule:</b> If NQ sweeps a Low (makes a lower low) but ES fails to sweep its matching Low (makes a higher low), that is a 'Crack in Correlation'. It confirms that the move down was a trap to sell to retail traders before reversing higher."
             },
             {
-                title: "2. The 'Kill Zone' (-2.0 STDV)",
-                body: "<b>Why -2.0 Standard Deviations?</b> We do not guess bottoms. We use math. By projecting the Asia Range size (High - Low) downwards by a factor of 2.0 to 4.0, we identify a statistical 'Exhaustion Point'.<br><br>When price hits this zone, it is mathematically overextended relative to the session's volatility. This is where we stop analysing and start hunting for an entry."
+                title: "2. The 'Kill Zone' (-2.5 STDV)",
+                body: "<b>Why -2.5 Standard Deviations?</b> We do not guess bottoms. We use math. By projecting the Asia Range size (High - Low) downwards by a factor of 2.5, we identify a statistical 'Exhaustion Point'.<br><br>When price hits this zone, it is mathematically overextended relative to the session's volatility. This is where we stop analysing and start hunting for an entry."
             },
             {
                 title: "3. 1-Minute Trigger (BOS + FVG)",
@@ -837,7 +975,7 @@ async def root():
             document.getElementById('detail-desc').innerText = data.description;
             const list = document.getElementById('detail-list');
             list.innerHTML = '';
-            data.components.forEach(comp => { list.innerHTML += `<li class="flex items-start text-sm text-slate-700"><span class="w-1.5 h-1.5 bg-sky-500 rounded-full mt-1.5 mr-2"></span>${comp}</li>`; });
+            data.components.forEach(comp => { list.innerHTML += `<li class="flex items-start text-sm text-slate-400"><span class="w-1.5 h-1.5 bg-sky-500 rounded-full mt-1.5 mr-2"></span>${comp}</li>`; });
         }
 
         document.addEventListener('DOMContentLoaded', () => {
@@ -850,7 +988,7 @@ async def root():
     </script>
 </body>
 </html>
-                        """)
+""")
 
 if __name__ == "__main__":
     t1 = threading.Thread(target=run_market_data_stream, daemon=True)
