@@ -61,7 +61,7 @@ GLOBAL_STATE = {
     "prediction": {
         "bias": "NEUTRAL", 
         "probability": 50, 
-        "narrative": "V4.2 Initializing...",
+        "narrative": "V4.3 Initializing...",
         "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "size": 0, "valid": False}
     },
     "performance": {"wins": 0, "total": 0, "win_rate": 0},
@@ -114,7 +114,6 @@ def calculate_position_size(entry, sl):
         stop_loss_dist = abs(entry - sl)
         if stop_loss_dist < 1: stop_loss_dist = 1 
         
-        # Standard Contract: $1 per point (Capital.com US100)
         position_size = risk_amount / stop_loss_dist
         return round(position_size, 2), round(risk_amount, 2)
     except:
@@ -125,7 +124,6 @@ def send_discord_alert(data, asset):
     current_time = time.time()
     bias = data['bias']
 
-    # 30 Minute Cooldown
     if bias == "LONG":
         if current_time - GLOBAL_STATE["last_long_alert"] < 1800: return
         GLOBAL_STATE["last_long_alert"] = current_time
@@ -140,12 +138,10 @@ def send_discord_alert(data, asset):
         raw_tp = data['trade_setup']['tp']
         raw_sl = data['trade_setup']['sl']
         
-        # Apply Dynamic Offset
         adj_entry = raw_entry - current_offset
         adj_tp = raw_tp - current_offset
         adj_sl = raw_sl - current_offset
 
-        # Calculate Risk
         lots, risk_usd = calculate_position_size(adj_entry, adj_sl)
         GLOBAL_STATE["prediction"]["trade_setup"]["size"] = lots
 
@@ -163,12 +159,11 @@ def send_discord_alert(data, asset):
                 {"name": "⚖️ Risk Calc", "value": f"Risk: ${risk_usd} ({GLOBAL_STATE['settings']['risk_pct']}%)\n**Size: {lots} Lots**", "inline": False},
                 {"name": "Confidence", "value": f"{data['probability']}%", "inline": True}
             ],
-            "footer": {"text": f"ForwardFin V4.2 • Risk Engine Active"}
+            "footer": {"text": f"ForwardFin V4.3 • Risk Engine Active"}
         }
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
         GLOBAL_STATE["last_alert_time"] = current_time
         
-        # Update Latch
         ui_data = data.copy()
         ui_data['trade_setup']['entry'] = adj_entry
         ui_data['trade_setup']['tp'] = adj_tp
@@ -194,7 +189,6 @@ def check_news():
             title = latest['title'].upper()
             pub_time = latest.get('providerPublishTime', 0)
             
-            # Check if news is < 2 hours old
             if time.time() - pub_time < 7200:
                 for word in DANGER_KEYWORDS:
                     if word in title:
@@ -224,7 +218,6 @@ def run_market_data_stream():
             tickers = "NQ=F ES=F"
             data = yf.download(tickers, period="5d", interval="1m", progress=False, group_by='ticker')
             
-            # Check news every 5 mins (approx 30 ticks)
             if tick_count % 30 == 0: check_news()
             tick_count += 1
 
@@ -246,7 +239,6 @@ def run_market_data_stream():
                 df_aux = df_aux.dropna()
                 
                 current_price = float(df_main['Close'].iloc[-1])
-                # Dynamic Offset
                 adjusted_price = current_price - GLOBAL_STATE["settings"]["offset"]
                 
                 now_time = datetime.now(sa_tz)
@@ -312,7 +304,7 @@ def get_recent_5m_swing(df_5m, bias):
 
 # --- WORKER 2: THE STRATEGY BRAIN ---
 def run_strategy_engine():
-    log_msg("SYS", "V4.2 Logic Loaded. 2.5 SD + Risk Engine Active.")
+    log_msg("SYS", "V4.3 Logic Loaded. 2.5 SD + Risk Engine Active.")
     while True:
         try:
             market = GLOBAL_STATE["market_data"]
@@ -370,12 +362,12 @@ def run_strategy_engine():
                 if asia_info['is_closed']: 
                     leg_range = high - low
                     
-                    # 2.5 SD LOGIC (UPDATED)
+                    # 2.5 SD LOGIC
                     buy_zone = low - (leg_range * 2.5)
                     sell_zone = high + (leg_range * 2.5)
 
                     if current_price < low:
-                        narrative = "⚠️ Low Swept. Monitoring for 2.5 SD."
+                        narrative = "⚠️ Asia Low Swept. Monitoring for 2.5 SD."
                         if current_price <= (buy_zone * 1.001): 
                             narrative = "🚨 KILL ZONE (2.5 SD). Checking Trigger..."
                             has_smt = check_smt_divergence(df, df_aux, "LOW")
@@ -390,7 +382,7 @@ def run_strategy_engine():
                                 setup = {"entry": current_price, "tp": tp2, "sl": sl_dynamic, "valid": True}
 
                     elif current_price > high:
-                        narrative = "⚠️ High Swept. Monitoring for 2.5 SD."
+                        narrative = "⚠️ Asia High Swept. Monitoring for 2.5 SD."
                         if current_price >= (sell_zone * 0.999):
                             narrative = "🚨 KILL ZONE (2.5 SD). Checking Trigger..."
                             has_smt = check_smt_divergence(df, df_aux, "HIGH")
@@ -451,7 +443,7 @@ async def update_settings(settings: SettingsUpdate):
     log_msg("SYS", f"Settings Updated: {settings.asset}")
     return {"status": "success"}
 
-@app.post("/api/calibrate-offset") # NEW
+@app.post("/api/calibrate-offset")
 async def calibrate(c: CalibrationUpdate):
     futures_price = GLOBAL_STATE["market_data"]["price"] 
     if futures_price > 0:
@@ -461,7 +453,7 @@ async def calibrate(c: CalibrationUpdate):
         return {"status": "ok", "offset": new_offset}
     return {"status": "error"}
 
-@app.post("/api/update-risk") # NEW
+@app.post("/api/update-risk")
 async def update_risk(r: RiskUpdate):
     GLOBAL_STATE["settings"]["balance"] = r.balance
     GLOBAL_STATE["settings"]["risk_pct"] = r.risk_pct
@@ -476,7 +468,7 @@ async def root():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ForwardFin V4.2 | Glass Box</title>
+    <title>ForwardFin V4.3 | Glass Box</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
@@ -587,7 +579,33 @@ async def root():
                     </div>
                 </div>
 
-                <div class="glass rounded-xl p-6 text-center">
+                <div class="glass rounded-xl p-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <h4 class="text-xs font-bold text-slate-500 uppercase">Trade Setup</h4>
+                        <span id="setup-validity" class="text-[10px] bg-slate-800 px-2 py-1 rounded text-slate-400">WAITING</span>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="flex justify-between text-xs">
+                            <span class="text-slate-500">Entry</span>
+                            <span id="setup-entry" class="text-white font-mono">---</span>
+                        </div>
+                        <div class="flex justify-between text-xs">
+                            <span class="text-slate-500">TP</span>
+                            <span id="setup-tp" class="text-emerald-400 font-mono">---</span>
+                        </div>
+                        <div class="flex justify-between text-xs">
+                            <span class="text-slate-500">SL</span>
+                            <span id="setup-sl" class="text-rose-400 font-mono">---</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass rounded-xl p-4 flex items-center justify-between">
+                    <span class="text-xs font-bold text-slate-400">SMT DIVERGENCE</span>
+                    <span id="smt-status" class="text-xs font-bold text-rose-500">SYNCED</span>
+                </div>
+                
+                <div class="glass rounded-xl p-4 text-center">
                     <div class="text-xs font-bold text-slate-500 uppercase mb-2">AI Signal</div>
                     <div id="signal-badge" class="inline-block px-4 py-2 bg-slate-800 rounded text-sm font-bold text-slate-400">NEUTRAL</div>
                 </div>
@@ -598,7 +616,7 @@ async def root():
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-10">
                 <div class="space-y-6">
                     <div class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-900/30 text-emerald-400 text-xs font-semibold uppercase tracking-wide border border-emerald-800">
-                        V4.2 LIVE: GLASS BOX MODE
+                        V4.3 LIVE: GLASS BOX MODE
                     </div>
                     <h1 class="text-4xl sm:text-5xl font-extrabold text-white leading-tight">
                         Precision Entries,<br>
@@ -615,7 +633,7 @@ async def root():
                 <div class="grid grid-cols-3 gap-4">
                     <div class="glass p-4 rounded-2xl flex flex-col items-center">
                         <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Correlation Monitor</h3>
-                        <div id="status-smt" class="text-xl font-black text-rose-500 mt-4">SYNCED</div>
+                        <div id="status-smt-big" class="text-xl font-black text-rose-500 mt-4">SYNCED</div>
                     </div>
                     <div class="glass p-4 rounded-2xl flex flex-col items-center">
                         <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Session Range</h3>
@@ -662,63 +680,6 @@ async def root():
                     <h2 class="text-3xl font-bold">Live Market Breakdown</h2>
                     <p class="mt-2 text-slate-400">Real-time Trade Architect</p>
                 </div>
-                <div class="bg-slate-800 rounded-2xl shadow-2xl overflow-hidden relative min-h-[400px] flex flex-col border border-slate-700">
-                    <div class="p-4 border-b border-slate-700 bg-slate-800/50 flex justify-between items-center">
-                        <div class="font-mono text-sky-400">TARGET: <span id="lbl-asset">NQ1!</span></div>
-                        <div class="text-xs text-slate-500">LIVE ANALYSIS</div>
-                    </div>
-                    <div class="flex-grow p-8 relative">
-                        <div id="sim-results" class="h-full flex flex-col md:flex-row gap-6">
-                            
-                            <div class="w-full md:w-1/3 flex flex-col gap-4">
-                                <div class="bg-slate-700/50 p-4 rounded-lg border border-slate-600">
-                                    <span class="text-xs text-slate-400 uppercase">Current Price (CFD)</span>
-                                    <div id="res-price" class="text-3xl font-mono font-bold text-white mt-1">---</div>
-                                </div>
-                                <div class="bg-slate-700/50 p-4 rounded-lg border border-slate-600">
-                                    <span class="text-xs text-slate-400 uppercase">AI Signal</span>
-                                    <div id="res-bias" class="text-xl font-bold mt-1 text-slate-300">---</div>
-                                </div>
-                                <div class="bg-slate-700/50 p-4 rounded-lg border border-slate-600">
-                                    <span class="text-xs text-slate-400 uppercase">Model Confidence</span>
-                                    <div id="res-prob" class="text-4xl font-bold text-sky-400 mt-1">---%</div>
-                                    <div class="w-full bg-slate-900 h-1.5 mt-2 rounded-full overflow-hidden">
-                                        <div id="prob-bar" class="bg-sky-500 h-full w-0 transition-all duration-1000"></div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="w-full md:w-2/3 flex flex-col gap-4">
-                                <div class="bg-slate-700/30 rounded-lg border border-slate-600 p-4">
-                                    <div class="flex justify-between items-center mb-3">
-                                        <h4 class="text-xs font-bold text-sky-400 uppercase">Suggested Trade Setup</h4>
-                                        <span id="setup-validity" class="text-[10px] bg-slate-700 px-2 py-1 rounded">WAITING</span>
-                                    </div>
-                                    <div class="grid grid-cols-3 gap-3 text-center">
-                                        <div class="bg-slate-800 p-2 rounded border border-slate-600">
-                                            <div class="text-[10px] text-slate-400">ENTRY (CFD)</div>
-                                            <div id="setup-entry" class="text-white font-bold">---</div>
-                                        </div>
-                                        <div class="bg-emerald-900/20 p-2 rounded border border-emerald-500/30">
-                                            <div class="text-[10px] text-emerald-400">TP1 (5m Swing)</div>
-                                            <div id="setup-tp" class="text-emerald-400 font-bold">---</div>
-                                        </div>
-                                        <div class="bg-rose-900/20 p-2 rounded border border-rose-500/30">
-                                            <div class="text-[10px] text-rose-400">SL (Dynamic)</div>
-                                            <div id="setup-sl" class="text-rose-400 font-bold">---</div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div class="bg-slate-700/30 rounded-lg border border-slate-600 p-6 relative overflow-hidden flex-grow">
-                                    <div class="absolute top-0 left-0 w-1 h-full bg-sky-500"></div>
-                                    <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2"><span>🤖</span> AI Reasoning</h3>
-                                    <p id="res-reason" class="text-slate-300 leading-relaxed font-light text-lg whitespace-pre-wrap">Waiting for analysis command...</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </div>
         </section>
 
@@ -726,7 +687,7 @@ async def root():
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-12">
                     <h2 class="text-3xl font-bold text-white">ForwardFin Academy</h2>
-                    <p class="mt-4 text-slate-400 max-w-2xl mx-auto">V4.2 Concepts: SMT Divergence & Liquidity.</p>
+                    <p class="mt-4 text-slate-400 max-w-2xl mx-auto">V4.3 Concepts: SMT Divergence & Liquidity.</p>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[400px]">
                     <div class="lg:col-span-4 glass rounded-xl overflow-hidden overflow-y-auto">
@@ -812,26 +773,7 @@ async def root():
             "container_id": "tradingview_chart"
         });
 
-        async function setAsset(asset) {
-            currentAsset = asset;
-            document.getElementById('btn-nq').className = asset === "NQ1!" ? "btn-asset active px-4 py-1.5 rounded text-sm font-bold bg-slate-800 text-slate-300" : "btn-asset px-4 py-1.5 rounded text-sm font-bold bg-slate-800 text-slate-300";
-            document.getElementById('btn-es').className = asset === "ES1!" ? "btn-asset active px-4 py-1.5 rounded text-sm font-bold bg-slate-800 text-slate-300" : "btn-asset px-4 py-1.5 rounded text-sm font-bold bg-slate-800 text-slate-300";
-            document.getElementById('lbl-asset').innerText = asset;
-            pushSettings(); 
-            initChart(asset);
-        }
-
-        async function pushSettings() {
-             const strategy = document.getElementById('sel-strategy').value;
-             const style = document.getElementById('sel-style').value;
-             await fetch('/api/update-settings', {
-                method: 'POST', 
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ asset: currentAsset, strategy: strategy, style: style })
-            });
-        }
-
-        // --- API & UI LOGIC (NEW) ---
+        // --- API & UI LOGIC ---
         async function calibrate() {
             const val = document.getElementById('inp-cfd').value;
             if(!val) return;
@@ -850,11 +792,11 @@ async def root():
             });
         }
 
-        async function updateDashboard() {
+        async function updateLoop() {
             try {
                 const res = await fetch('/api/live-data');
                 const data = await res.json();
-                
+
                 // Top Bar
                 document.getElementById('nav-ticker').innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> ${data.settings.asset}: $${data.market_data.price.toLocaleString()}`;
                 if(data.market_data.server_time) document.getElementById('server-clock').innerText = data.market_data.server_time;
@@ -869,30 +811,43 @@ async def root():
                     newsEl.innerText = "📰 News: Clear";
                 }
 
-                // Stats & Terminal
+                // Stats
                 document.getElementById('stat-offset').innerText = data.settings.offset.toFixed(2);
                 document.getElementById('price-display').innerText = "$" + data.market_data.price.toLocaleString(undefined, {minimumFractionDigits: 2});
-                const term = document.getElementById('terminal');
-                if(data.logs.length > 0) term.innerHTML = data.logs.map(l => `<div>${l}</div>`).join('');
-
-                // Signal & AI
+                
+                // Signal
                 const sigEl = document.getElementById('signal-badge');
                 sigEl.innerText = data.prediction.bias;
                 if(data.prediction.bias === "LONG") sigEl.className = "inline-block mt-3 px-3 py-1 bg-emerald-600 rounded text-xs font-bold text-white animate-pulse";
                 else if(data.prediction.bias === "SHORT") sigEl.className = "inline-block mt-3 px-3 py-1 bg-rose-600 rounded text-xs font-bold text-white animate-pulse";
                 else sigEl.className = "inline-block mt-3 px-3 py-1 bg-slate-800 rounded text-xs font-bold text-slate-400";
-                
-                document.getElementById('ai-text').innerText = data.prediction.narrative;
 
-                // SMT Logic
-                const smtEl = document.getElementById('status-smt');
+                document.getElementById('ai-text').innerText = data.prediction.narrative;
+                const smtEl = document.getElementById('smt-status');
+                const smtElBig = document.getElementById('status-smt-big');
                 if(data.market_data.smt_detected) {
-                    smtEl.innerText = "DIVERGENCE"; smtEl.className = "text-xl font-black text-emerald-500 mt-4 animate-pulse";
+                    smtEl.innerText = "DIVERGENCE"; smtEl.className = "text-xs font-bold text-emerald-400";
+                    if(smtElBig) { smtElBig.innerText = "DIVERGENCE"; smtElBig.className = "text-xl font-black text-emerald-500 mt-4 animate-pulse"; }
                 } else {
-                    smtEl.innerText = "SYNCED"; smtEl.className = "text-xl font-black text-rose-500 mt-4";
+                    smtEl.innerText = "SYNCED"; smtEl.className = "text-xs font-bold text-rose-500";
+                    if(smtElBig) { smtElBig.innerText = "SYNCED"; smtElBig.className = "text-xl font-black text-rose-500 mt-4"; }
                 }
 
-                // Session Status
+                // Setup (THIS CAUSED THE CRASH BEFORE - FIXED NOW)
+                const setup = data.prediction.trade_setup;
+                const validEl = document.getElementById('setup-validity');
+                if(validEl) {
+                    if(setup.valid) {
+                        validEl.innerText = "ACTIVE"; validEl.className = "text-[10px] bg-emerald-600 px-2 py-1 rounded text-white";
+                        document.getElementById('setup-entry').innerText = "$" + setup.entry.toLocaleString();
+                        document.getElementById('setup-tp').innerText = "$" + setup.tp.toLocaleString();
+                        document.getElementById('setup-sl').innerText = "$" + setup.sl.toLocaleString();
+                    } else {
+                        validEl.innerText = "WAITING"; validEl.className = "text-[10px] bg-slate-800 px-2 py-1 rounded text-slate-400";
+                    }
+                }
+
+                // Session
                 const fibEl = document.getElementById('status-fib');
                 const sessionLow = data.market_data.session_low;
                 const sessionHigh = data.market_data.session_high;
@@ -903,46 +858,23 @@ async def root():
                       fibEl.innerText = "WAITING FOR DATA";
                 }
 
-                const prob = data.prediction.probability;
-                document.getElementById('res-prob').innerText = prob + "%";
-                document.getElementById('prob-bar').style.width = prob + "%";
-                
-                 // Setup
-                const setup = data.prediction.trade_setup;
-                const validEl = document.getElementById('setup-validity');
-                if(setup.valid) {
-                      validEl.innerText = "ACTIVE";
-                      validEl.className = "text-[10px] bg-emerald-600 px-2 py-1 rounded text-white";
-                      document.getElementById('setup-entry').innerText = "$" + setup.entry.toLocaleString();
-                      document.getElementById('setup-tp').innerText = "$" + setup.tp.toLocaleString();
-                      document.getElementById('setup-sl').innerText = "$" + setup.sl.toLocaleString();
-                } else {
-                      validEl.innerText = "WAITING";
-                      validEl.className = "text-[10px] bg-slate-700 px-2 py-1 rounded text-slate-400";
-                }
-
                 if (data.performance) {
                     const wr = data.performance.win_rate;
                     document.getElementById('win-rate').innerText = wr + "%";
                     document.getElementById('win-bar').style.width = wr + "%";
                 }
-            } catch (e) { console.log(e); }
+
+                const term = document.getElementById('terminal');
+                term.innerHTML = data.logs.map(l => `<div>${l}</div>`).join('');
+
+            } catch(e) {}
         }
-        
-        // --- 3. ACADEMY INTERACTIVITY (RESTORED) ---
+
+        // --- CONTENT LOGIC (Restored) ---
         const lessons = [
-            {
-                title: "1. SMT Divergence",
-                body: "<b>Smart Money Technique (SMT):</b> This is our 'Lie Detector'. Institutional algorithms often manipulate one index (like NQ) to grab liquidity while holding the other (like ES) steady.<br><br><b>The Rule:</b> If NQ sweeps a Low (makes a lower low) but ES fails to sweep its matching Low (makes a higher low), that is a 'Crack in Correlation'. It confirms that the move down was a trap to sell to retail traders before reversing higher."
-            },
-            {
-                title: "2. The 'Kill Zone' (-2.5 STDV)",
-                body: "<b>Why -2.5 Standard Deviations?</b> We do not guess bottoms. We use math. By projecting the Asia Range size (High - Low) downwards by a factor of 2.5, we identify a statistical 'Exhaustion Point'.<br><br>When price hits this zone, it is mathematically overextended relative to the session's volatility. This is where we stop analysing and start hunting for an entry."
-            },
-            {
-                title: "3. 1-Minute Trigger (BOS + FVG)",
-                body: "<b>The Kill Switch:</b> SMT and STDV are just context. The Trigger confirms the reversal. We switch to the 1-minute chart and demand two things:<br>1. <b>BOS (Break of Structure):</b> Price must break above the last swing high, proving buyers are stepping in.<br>2. <b>FVG (Fair Value Gap):</b> This energetic move must leave behind an imbalance gap. This proves the move was institutional, not random noise."
-            }
+            { title: "1. SMT Divergence", body: "<b>Smart Money Technique (SMT):</b> This is our 'Lie Detector'. Institutional algorithms often manipulate one index (like NQ) to grab liquidity while holding the other (like ES) steady.<br><br><b>The Rule:</b> If NQ sweeps a Low (makes a lower low) but ES fails to sweep its matching Low (makes a higher low), that is a 'Crack in Correlation'. It confirms that the move down was a trap to sell to retail traders before reversing higher." },
+            { title: "2. The 'Kill Zone' (-2.5 STDV)", body: "<b>Why -2.5 Standard Deviations?</b> We do not guess bottoms. We use math. By projecting the Asia Range size (High - Low) downwards by a factor of 2.5, we identify a statistical 'Exhaustion Point'.<br><br>When price hits this zone, it is mathematically overextended relative to the session's volatility. This is where we stop analysing and start hunting for an entry." },
+            { title: "3. 1-Minute Trigger (BOS + FVG)", body: "<b>The Kill Switch:</b> SMT and STDV are just context. The Trigger confirms the reversal. We switch to the 1-minute chart and demand two things:<br>1. <b>BOS (Break of Structure):</b> Price must break above the last swing high, proving buyers are stepping in.<br>2. <b>FVG (Fair Value Gap):</b> This energetic move must leave behind an imbalance gap. This proves the move was institutional, not random noise." }
         ];
 
         function loadLesson(index) {
@@ -955,7 +887,6 @@ async def root():
             });
         }
         
-        // --- 4. ARCHITECTURE INTERACTIVITY (RESTORED) ---
         const architectureData = [
             { title: "Data Ingestion", badge: "Infrastructure", description: "Connects to Yahoo Finance to fetch real-time 1-minute candle data for NQ=F and ES=F futures contracts.", components: ["yfinance", "Python Requests"] },
             { title: "Analysis Engine", badge: "Data Science", description: "Resamples 1m data to 5m to find STDV Zones. Calculates live Volatility and detects IFVGs.", components: ["Pandas Resample", "NumPy Math", "Custom Fib Scanner"] },
@@ -982,13 +913,14 @@ async def root():
             initChart("NQ1!");
             loadLesson(0);
             selectLayer(0);
-            updateDashboard();
-            setInterval(updateDashboard, 5000);
+            updateLoop();
+            setInterval(updateLoop, 2000);
         });
     </script>
 </body>
 </html>
-""")
+"""
+)
 
 if __name__ == "__main__":
     t1 = threading.Thread(target=run_market_data_stream, daemon=True)
