@@ -61,7 +61,7 @@ GLOBAL_STATE = {
     "prediction": {
         "bias": "NEUTRAL", 
         "probability": 50, 
-        "narrative": "V4.3 Initializing...",
+        "narrative": "V4.4 Initializing...",
         "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "size": 0, "valid": False}
     },
     "performance": {"wins": 0, "total": 0, "win_rate": 0},
@@ -159,7 +159,7 @@ def send_discord_alert(data, asset):
                 {"name": "⚖️ Risk Calc", "value": f"Risk: ${risk_usd} ({GLOBAL_STATE['settings']['risk_pct']}%)\n**Size: {lots} Lots**", "inline": False},
                 {"name": "Confidence", "value": f"{data['probability']}%", "inline": True}
             ],
-            "footer": {"text": f"ForwardFin V4.3 • Risk Engine Active"}
+            "footer": {"text": f"ForwardFin V4.4 • Risk Engine Active"}
         }
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
         GLOBAL_STATE["last_alert_time"] = current_time
@@ -304,7 +304,7 @@ def get_recent_5m_swing(df_5m, bias):
 
 # --- WORKER 2: THE STRATEGY BRAIN ---
 def run_strategy_engine():
-    log_msg("SYS", "V4.3 Logic Loaded. 2.5 SD + Risk Engine Active.")
+    log_msg("SYS", "V4.4 Logic Loaded. 2.5 SD + Risk Engine Active.")
     while True:
         try:
             market = GLOBAL_STATE["market_data"]
@@ -468,7 +468,7 @@ async def root():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ForwardFin V4.3 | Glass Box</title>
+    <title>ForwardFin V4.4 | Glass Box</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
@@ -616,7 +616,7 @@ async def root():
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-10">
                 <div class="space-y-6">
                     <div class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-900/30 text-emerald-400 text-xs font-semibold uppercase tracking-wide border border-emerald-800">
-                        V4.3 LIVE: GLASS BOX MODE
+                        V4.4 LIVE: GLASS BOX MODE
                     </div>
                     <h1 class="text-4xl sm:text-5xl font-extrabold text-white leading-tight">
                         Precision Entries,<br>
@@ -664,30 +664,17 @@ async def root():
             </div>
         </section>
 
-        <section class="py-4 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-            <div class="bg-slate-900 rounded-2xl shadow-2xl border border-slate-800 overflow-hidden">
-                <div class="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 backdrop-blur">
-                    <h3 class="font-bold text-white flex items-center gap-2"><span>📈</span> Institutional Price Action</h3>
-                    <span class="text-xs text-slate-500 font-mono">SOURCE: CAPITAL.COM</span>
-                </div>
-                <div class="h-[500px] w-full" id="tradingview_chart"></div>
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-12">
+             <div class="glass p-1 rounded-xl h-[500px] overflow-hidden">
+                <div id="tv-chart" class="w-full h-full rounded-lg bg-slate-900"></div>
             </div>
-        </section>
-
-        <section id="simulation" class="py-20 bg-slate-900 text-white">
-            <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="text-center mb-10">
-                    <h2 class="text-3xl font-bold">Live Market Breakdown</h2>
-                    <p class="mt-2 text-slate-400">Real-time Trade Architect</p>
-                </div>
-            </div>
-        </section>
+        </div>
 
         <section id="academy" class="py-16 bg-slate-900 border-t border-slate-800">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-12">
                     <h2 class="text-3xl font-bold text-white">ForwardFin Academy</h2>
-                    <p class="mt-4 text-slate-400 max-w-2xl mx-auto">V4.3 Concepts: SMT Divergence & Liquidity.</p>
+                    <p class="mt-4 text-slate-400 max-w-2xl mx-auto">V4.4 Concepts: SMT Divergence & Liquidity.</p>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[400px]">
                     <div class="lg:col-span-4 glass rounded-xl overflow-hidden overflow-y-auto">
@@ -757,21 +744,23 @@ async def root():
 
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script>
-        // Init Chart
-        new TradingView.widget({
-            "autosize": true,
-            "symbol": "CAPITALCOM:US100",
-            "interval": "1",
-            "timezone": "Africa/Johannesburg",
-            "theme": "dark",
-            "style": "1",
-            "locale": "en",
-            "toolbar_bg": "#f1f3f6",
-            "enable_publishing": false,
-            "hide_side_toolbar": false,
-            "allow_symbol_change": false,
-            "container_id": "tradingview_chart"
-        });
+        // Init Chart Function - RESTORED
+        function initChart(symbol) {
+            new TradingView.widget({
+                "autosize": true,
+                "symbol": "CAPITALCOM:US100",
+                "interval": "1",
+                "timezone": "Africa/Johannesburg",
+                "theme": "dark",
+                "style": "1",
+                "locale": "en",
+                "toolbar_bg": "#f1f3f6",
+                "enable_publishing": false,
+                "hide_side_toolbar": false,
+                "allow_symbol_change": false,
+                "container_id": "tv-chart"
+            });
+        }
 
         // --- API & UI LOGIC ---
         async function calibrate() {
@@ -792,6 +781,15 @@ async def root():
             });
         }
 
+        async function setAsset(asset) {
+            // Function stub for buttons
+            initChart(asset);
+        }
+        
+        async function pushSettings() {
+             // Function stub
+        }
+
         async function updateLoop() {
             try {
                 const res = await fetch('/api/live-data');
@@ -804,10 +802,10 @@ async def root():
                 // News
                 const newsEl = document.getElementById('news-status');
                 if(data.news.is_danger) {
-                    newsEl.className = "text-xs px-3 py-1 rounded bg-red-900/50 border border-red-500 text-red-200 animate-pulse";
+                    newsEl.className = "hidden md:block text-xs px-3 py-1 rounded bg-red-900/50 border border-red-500 text-red-200 animate-pulse";
                     newsEl.innerText = "⛔ NEWS HALT: " + data.news.headline;
                 } else {
-                    newsEl.className = "text-xs px-3 py-1 rounded bg-slate-800 border border-slate-700 text-slate-400";
+                    newsEl.className = "hidden md:block text-xs px-3 py-1 rounded bg-slate-800 border border-slate-700 text-slate-400";
                     newsEl.innerText = "📰 News: Clear";
                 }
 
@@ -818,9 +816,9 @@ async def root():
                 // Signal
                 const sigEl = document.getElementById('signal-badge');
                 sigEl.innerText = data.prediction.bias;
-                if(data.prediction.bias === "LONG") sigEl.className = "inline-block mt-3 px-3 py-1 bg-emerald-600 rounded text-xs font-bold text-white animate-pulse";
-                else if(data.prediction.bias === "SHORT") sigEl.className = "inline-block mt-3 px-3 py-1 bg-rose-600 rounded text-xs font-bold text-white animate-pulse";
-                else sigEl.className = "inline-block mt-3 px-3 py-1 bg-slate-800 rounded text-xs font-bold text-slate-400";
+                if(data.prediction.bias === "LONG") sigEl.className = "inline-block px-4 py-2 bg-emerald-600 rounded text-sm font-bold text-white animate-pulse";
+                else if(data.prediction.bias === "SHORT") sigEl.className = "inline-block px-4 py-2 bg-rose-600 rounded text-sm font-bold text-white animate-pulse";
+                else sigEl.className = "inline-block px-4 py-2 bg-slate-800 rounded text-sm font-bold text-slate-400";
 
                 document.getElementById('ai-text').innerText = data.prediction.narrative;
                 const smtEl = document.getElementById('smt-status');
@@ -833,7 +831,7 @@ async def root():
                     if(smtElBig) { smtElBig.innerText = "SYNCED"; smtElBig.className = "text-xl font-black text-rose-500 mt-4"; }
                 }
 
-                // Setup (THIS CAUSED THE CRASH BEFORE - FIXED NOW)
+                // Setup (Restored)
                 const setup = data.prediction.trade_setup;
                 const validEl = document.getElementById('setup-validity');
                 if(validEl) {
