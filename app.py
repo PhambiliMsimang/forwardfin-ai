@@ -33,14 +33,15 @@ GLOBAL_STATE = {
     "settings": {
         "asset": "NQ1!",       
         "strategy": "SWEEP",   
-        "style": "PRECISION",   # UPDATED: Professional Name
+        "style": "PRECISION",   
         "offset": 105.0,        
         "balance": 1000.0,      
         "risk_pct": 2.0         
     },
     "market_data": {
         "price": 0.00,
-        "adjusted_price": 0.00, 
+        "adjusted_price": 0.00,
+        "rsi": 50.0,            # [NEW] V4.6: RSI Memory
         "ifvg_detected": False, 
         "smt_detected": False, 
         "fib_status": "NEUTRAL",
@@ -61,7 +62,7 @@ GLOBAL_STATE = {
     "prediction": {
         "bias": "NEUTRAL", 
         "probability": 50, 
-        "narrative": "V4.5 Precision Mode Initializing...",
+        "narrative": "V4.6 Drift-Proof Initializing...",
         "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "size": 0, "valid": False}
     },
     "performance": {"wins": 0, "total": 0, "win_rate": 0},
@@ -134,15 +135,12 @@ def send_discord_alert(data, asset):
     try:
         current_offset = GLOBAL_STATE["settings"]["offset"]
         
-        raw_entry = data['trade_setup']['entry']
+        # [NEW] V4.6: Use LIVE Market Price for Alert (Fixes Ghost Trades)
+        raw_entry = GLOBAL_STATE["market_data"]["adjusted_price"]
         raw_tp = data['trade_setup']['tp']
         raw_sl = data['trade_setup']['sl']
         
-        adj_entry = raw_entry - current_offset
-        adj_tp = raw_tp - current_offset
-        adj_sl = raw_sl - current_offset
-
-        lots, risk_usd = calculate_position_size(adj_entry, adj_sl)
+        lots, risk_usd = calculate_position_size(raw_entry, raw_sl)
         GLOBAL_STATE["prediction"]["trade_setup"]["size"] = lots
 
         color = 5763719 if bias == "LONG" else 15548997
@@ -150,24 +148,22 @@ def send_discord_alert(data, asset):
         
         embed = {
             "title": f"{style_icon} SIGNAL: {asset} {bias}",
-            "description": f"**AI Reasoning:**\n{data['narrative']}\n\n**⚙️ Offset:** -{int(current_offset)} pts",
+            "description": f"**AI Reasoning:**\n{data['narrative']}\n\n**🛡️ Crash Protection:** RSI Checked & Safe",
             "color": color,
             "fields": [
-                {"name": "Entry (CFD)", "value": f"${adj_entry:,.2f}", "inline": True},
-                {"name": "🛑 SL (Swing)", "value": f"${adj_sl:,.2f}", "inline": True},
-                {"name": "🎯 TP (Asia)", "value": f"${adj_tp:,.2f}", "inline": True},
+                {"name": "ENTRY (MARKET)", "value": f"**EXECUTE NOW**\nApprox: ${raw_entry:,.2f}", "inline": True},
+                {"name": "🛑 SL (Swing)", "value": f"${raw_sl:,.2f}", "inline": True},
+                {"name": "🎯 TP (Asia)", "value": f"${raw_tp:,.2f}", "inline": True},
                 {"name": "⚖️ Risk Calc", "value": f"Risk: ${risk_usd} ({GLOBAL_STATE['settings']['risk_pct']}%)\n**Size: {lots} Lots**", "inline": False},
                 {"name": "Confidence", "value": f"{data['probability']}%", "inline": True}
             ],
-            "footer": {"text": f"ForwardFin V4.5 • Precision Protocol"}
+            "footer": {"text": f"ForwardFin V4.6 • Drift-Proof Engine"}
         }
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
         GLOBAL_STATE["last_alert_time"] = current_time
         
         ui_data = data.copy()
-        ui_data['trade_setup']['entry'] = adj_entry
-        ui_data['trade_setup']['tp'] = adj_tp
-        ui_data['trade_setup']['sl'] = adj_sl
+        ui_data['trade_setup']['entry'] = raw_entry
         GLOBAL_STATE["signal_latch"]["active"] = True
         GLOBAL_STATE["signal_latch"]["data"] = ui_data
         GLOBAL_STATE["signal_latch"]["time"] = current_time
@@ -234,6 +230,14 @@ def run_market_data_stream():
                 df_main.index = df_main.index.tz_convert(sa_tz) if df_main.index.tz else df_main.index.tz_localize('UTC').tz_convert(sa_tz)
                 df_main = df_main.dropna()
 
+                # [NEW] V4.6: RSI Calculation Engine
+                delta = df_main['Close'].diff()
+                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                rs = gain / loss
+                rsi = 100 - (100 / (1 + rs))
+                current_rsi = float(rsi.iloc[-1]) if not rsi.empty else 50.0
+
                 df_aux = data[aux_ticker].copy()
                 df_aux.index = df_aux.index.tz_convert(sa_tz) if df_aux.index.tz else df_aux.index.tz_localize('UTC').tz_convert(sa_tz)
                 df_aux = df_aux.dropna()
@@ -244,6 +248,7 @@ def run_market_data_stream():
                 now_time = datetime.now(sa_tz)
                 GLOBAL_STATE["market_data"]["price"] = current_price
                 GLOBAL_STATE["market_data"]["adjusted_price"] = adjusted_price
+                GLOBAL_STATE["market_data"]["rsi"] = current_rsi # Stored for Strategy
                 GLOBAL_STATE["market_data"]["server_time"] = now_time.strftime('%H:%M:%S')
                 GLOBAL_STATE["market_data"]["history"] = df_main['Close'].tolist()[-100:]
                 GLOBAL_STATE["market_data"]["highs"] = df_main['High'].tolist()[-100:]
@@ -299,16 +304,20 @@ def detect_1m_trigger(df, trend_bias):
 # --- HELPER: 5M SWING DETECTION ---
 def get_recent_5m_swing(df_5m, bias):
     if len(df_5m) < 10: return 0
-    if bias == "LONG": return float(df_5m['High'].iloc[-10:].max())
-    else: return float(df_5m['Low'].iloc[-10:].min())
+    # [NEW] V4.6: Return relative price (minus offset)
+    current_offset = GLOBAL_STATE["settings"]["offset"]
+    if bias == "LONG": return float(df_5m['High'].iloc[-10:].max()) - current_offset
+    else: return float(df_5m['Low'].iloc[-10:].min()) - current_offset
 
 # --- WORKER 2: THE STRATEGY BRAIN ---
 def run_strategy_engine():
-    log_msg("SYS", "V4.5 Logic Loaded. Precision Mode Active.")
+    log_msg("SYS", "V4.6 Logic Loaded. RSI Guard Active.")
     while True:
         try:
             market = GLOBAL_STATE["market_data"]
             current_price = market["price"]
+            current_rsi = market["rsi"] # [NEW]
+            current_offset = GLOBAL_STATE["settings"]["offset"]
             df = market["df"]
             current_asset = GLOBAL_STATE["settings"]["asset"]
             aux_key = "ES" if current_asset == "NQ1!" else "NQ"
@@ -341,7 +350,6 @@ def run_strategy_engine():
             
             bias = "NEUTRAL"
             prob = 50
-            # UPDATED: Fallback Narrative
             narrative = "Scanning Market Structure..."
             setup = {"entry": 0, "tp": 0, "sl": 0, "size": 0, "valid": False}
             
@@ -357,8 +365,9 @@ def run_strategy_engine():
             if asia_info:
                 high = asia_info['high']
                 low = asia_info['low']
-                GLOBAL_STATE["market_data"]["session_high"] = high
-                GLOBAL_STATE["market_data"]["session_low"] = low
+                # [NEW] Store Relative Levels
+                GLOBAL_STATE["market_data"]["session_high"] = high - current_offset
+                GLOBAL_STATE["market_data"]["session_low"] = low - current_offset
 
                 if asia_info['is_closed']: 
                     leg_range = high - low
@@ -368,41 +377,46 @@ def run_strategy_engine():
                     sell_zone = high + (leg_range * 2.5)
 
                     if current_price < low:
-                        narrative = f"⚠️ Asia Low Swept. Monitoring for 2.5 SD ({buy_zone:.2f})."
+                        narrative = f"⚠️ Asia Low Swept. Monitoring for 2.5 SD."
                         if current_price <= (buy_zone * 1.001): 
-                            narrative = "🚨 KILL ZONE (2.5 SD). Checking Trigger..."
-                            has_smt = check_smt_divergence(df, df_aux, "LOW")
-                            if detect_1m_trigger(df, "LONG"):
-                                bias = "LONG"
-                                prob = 95 if has_smt else 85 
-                                tp1 = get_recent_5m_swing(df_5m, "LONG")
-                                tp2 = high 
-                                sl_dynamic = float(df['Low'].iloc[-5:].min()) 
-                                narrative = "✅ BUY SIGNAL (2.5 SD Reversal)"
-                                if not has_smt: narrative += " (No SMT)"
-                                setup = {"entry": current_price, "tp": tp2, "sl": sl_dynamic, "valid": True}
+                            # [NEW] V4.6 CRASH GUARD:
+                            if current_rsi < 30:
+                                narrative = f"⛔ WATERFALL: Price in Zone, but RSI {current_rsi:.1f} is too weak. Waiting for curl."
+                            else:
+                                narrative = "🚨 KILL ZONE (2.5 SD). RSI OK. Checking Trigger..."
+                                has_smt = check_smt_divergence(df, df_aux, "LOW")
+                                if detect_1m_trigger(df, "LONG"):
+                                    bias = "LONG"
+                                    prob = 95 if has_smt else 85 
+                                    tp1 = get_recent_5m_swing(df_5m, "LONG")
+                                    tp2 = high - current_offset
+                                    sl_dynamic = float(df['Low'].iloc[-5:].min()) - current_offset
+                                    narrative = f"✅ BUY SIGNAL (2.5 SD). RSI {current_rsi:.1f} Healthy."
+                                    if not has_smt: narrative += " (No SMT)"
+                                    setup = {"entry": current_price - current_offset, "tp": tp2, "sl": sl_dynamic, "valid": True}
 
                     elif current_price > high:
-                        narrative = f"⚠️ Asia High Swept. Monitoring for 2.5 SD ({sell_zone:.2f})."
+                        narrative = "⚠️ Asia High Swept. Monitoring for 2.5 SD."
                         if current_price >= (sell_zone * 0.999):
-                            narrative = "🚨 KILL ZONE (2.5 SD). Checking Trigger..."
-                            has_smt = check_smt_divergence(df, df_aux, "HIGH")
-                            if detect_1m_trigger(df, "SHORT"):
-                                bias = "SHORT"
-                                prob = 95 if has_smt else 85 
-                                tp1 = get_recent_5m_swing(df_5m, "SHORT")
-                                tp2 = low 
-                                sl_dynamic = float(df['High'].iloc[-5:].max()) 
-                                narrative = "✅ SELL SIGNAL (2.5 SD Reversal)"
-                                if not has_smt: narrative += " (No SMT)"
-                                setup = {"entry": current_price, "tp": tp2, "sl": sl_dynamic, "valid": True}
-                    
+                            # [NEW] V4.6 ROCKET GUARD:
+                            if current_rsi > 70:
+                                narrative = f"⛔ ROCKET: Price in Zone, but RSI {current_rsi:.1f} is too strong. Waiting for dip."
+                            else:
+                                narrative = "🚨 KILL ZONE (2.5 SD). RSI OK. Checking Trigger..."
+                                has_smt = check_smt_divergence(df, df_aux, "HIGH")
+                                if detect_1m_trigger(df, "SHORT"):
+                                    bias = "SHORT"
+                                    prob = 95 if has_smt else 85 
+                                    tp1 = get_recent_5m_swing(df_5m, "SHORT")
+                                    tp2 = low - current_offset
+                                    sl_dynamic = float(df['High'].iloc[-5:].max()) - current_offset
+                                    narrative = f"✅ SELL SIGNAL (2.5 SD). RSI {current_rsi:.1f} Healthy."
+                                    if not has_smt: narrative += " (No SMT)"
+                                    setup = {"entry": current_price - current_offset, "tp": tp2, "sl": sl_dynamic, "valid": True}
                     else:
-                        # UPDATED: Specific Narrative for Range
-                        narrative = f"📉 Consolidating inside Asia Range ({low:.2f} - {high:.2f}).\nWaiting for a Sweep."
+                        narrative = f"📉 Consolidating inside Asia Range.\nWaiting for a Sweep."
                 
                 else:
-                    # UPDATED: Specific Narrative for Session
                     narrative = "⏳ Asia Session Active (03:00-08:59 SAST).\nRecording Highs and Lows..."
 
             GLOBAL_STATE["prediction"] = {"bias": bias, "probability": prob, "narrative": narrative, "trade_setup": setup}
@@ -477,7 +491,7 @@ async def root():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ForwardFin V4.5 | Glass Box</title>
+    <title>ForwardFin V4.6 | Drift-Proof</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
@@ -613,6 +627,11 @@ async def root():
                     <span class="text-xs font-bold text-slate-400">SMT DIVERGENCE</span>
                     <span id="smt-status" class="text-xs font-bold text-rose-500">SYNCED</span>
                 </div>
+
+                <div class="glass rounded-xl p-4 flex items-center justify-between">
+                    <span class="text-xs font-bold text-slate-400">MOMENTUM RSI</span>
+                    <span id="rsi-status" class="text-xs font-bold text-sky-500">--.-</span>
+                </div>
                 
                 <div class="glass rounded-xl p-4 text-center">
                     <div class="text-xs font-bold text-slate-500 uppercase mb-2">AI Signal</div>
@@ -625,11 +644,11 @@ async def root():
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-10">
                 <div class="space-y-6">
                     <div class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-900/30 text-emerald-400 text-xs font-semibold uppercase tracking-wide border border-emerald-800">
-                        V4.5 LIVE: GLASS BOX MODE
+                        V4.6 LIVE: DRIFT-PROOF MODE
                     </div>
                     <h1 class="text-4xl sm:text-5xl font-extrabold text-white leading-tight">
                         Precision Entries,<br>
-                        <span class="text-sky-500">Fully Controlled.</span>
+                        <span class="text-sky-500">Momentum Guarded.</span>
                     </h1>
                     <div class="flex items-center gap-2 mt-4 text-slate-500 font-mono text-sm">
                         <span>🕒 BOT TIME (SAST):</span>
@@ -683,7 +702,7 @@ async def root():
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-12">
                     <h2 class="text-3xl font-bold text-white">ForwardFin Academy</h2>
-                    <p class="mt-4 text-slate-400 max-w-2xl mx-auto">V4.5 Concepts: SMT Divergence & Liquidity.</p>
+                    <p class="mt-4 text-slate-400 max-w-2xl mx-auto">V4.6 Concepts: SMT Divergence & Liquidity.</p>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[400px]">
                     <div class="lg:col-span-4 glass rounded-xl overflow-hidden overflow-y-auto">
@@ -839,6 +858,14 @@ async def root():
                     if(smtElBig) { smtElBig.innerText = "SYNCED"; smtElBig.className = "text-xl font-black text-rose-500 mt-4"; }
                 }
 
+                // [NEW] V4.6 RSI Display
+                const rsiEl = document.getElementById('rsi-status');
+                if(rsiEl && data.market_data.rsi) {
+                    rsiEl.innerText = data.market_data.rsi.toFixed(1);
+                    if(data.market_data.rsi < 30 || data.market_data.rsi > 70) rsiEl.className = "text-xs font-bold text-rose-500 animate-pulse";
+                    else rsiEl.className = "text-xs font-bold text-emerald-500";
+                }
+
                 // Setup
                 const setup = data.prediction.trade_setup;
                 const validEl = document.getElementById('setup-validity');
@@ -858,7 +885,7 @@ async def root():
                 const sessionLow = data.market_data.session_low;
                 const sessionHigh = data.market_data.session_high;
                 if (sessionLow > 0) {
-                      fibEl.innerText = `${sessionLow} - ${sessionHigh}`;
+                      fibEl.innerText = `${sessionLow.toFixed(2)} - ${sessionHigh.toFixed(2)}`;
                       fibEl.className = "text-sm font-bold text-slate-300 mt-4 text-center";
                 } else {
                       fibEl.innerText = "WAITING FOR DATA";
@@ -876,7 +903,7 @@ async def root():
             } catch(e) {}
         }
 
-        // --- CONTENT LOGIC ---
+        // --- CONTENT LOGIC (Restored) ---
         const lessons = [
             { title: "1. SMT Divergence", body: "<b>Smart Money Technique (SMT):</b> This is our 'Lie Detector'. Institutional algorithms often manipulate one index (like NQ) to grab liquidity while holding the other (like ES) steady.<br><br><b>The Rule:</b> If NQ sweeps a Low (makes a lower low) but ES fails to sweep its matching Low (makes a higher low), that is a 'Crack in Correlation'. It confirms that the move down was a trap to sell to retail traders before reversing higher." },
             { title: "2. The 'Kill Zone' (-2.5 STDV)", body: "<b>Why -2.5 Standard Deviations?</b> We do not guess bottoms. We use math. By projecting the Asia Range size (High - Low) downwards by a factor of 2.5, we identify a statistical 'Exhaustion Point'.<br><br>When price hits this zone, it is mathematically overextended relative to the session's volatility. This is where we stop analysing and start hunting for an entry." },
