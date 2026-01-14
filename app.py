@@ -33,10 +33,10 @@ GLOBAL_STATE = {
     "settings": {
         "asset": "NQ1!",       
         "strategy": "SWEEP",   
-        "style": "SNIPER",
-        "offset": 105.0,        # Dynamic Offset
-        "balance": 1000.0,      # Risk Calc
-        "risk_pct": 2.0         # Risk Calc
+        "style": "PRECISION",   # UPDATED: Professional Name
+        "offset": 105.0,        
+        "balance": 1000.0,      
+        "risk_pct": 2.0         
     },
     "market_data": {
         "price": 0.00,
@@ -53,7 +53,7 @@ GLOBAL_STATE = {
         "aux_data": {"NQ": None, "ES": None},
         "server_time": "--:--:--" 
     },
-    "news": {                   # News State
+    "news": {                   
         "is_danger": False,
         "headline": "No Active Threats",
         "last_scan": "Not scanned yet"
@@ -61,11 +61,11 @@ GLOBAL_STATE = {
     "prediction": {
         "bias": "NEUTRAL", 
         "probability": 50, 
-        "narrative": "V4.4 Initializing...",
+        "narrative": "V4.5 Precision Mode Initializing...",
         "trade_setup": {"entry": 0, "tp": 0, "sl": 0, "size": 0, "valid": False}
     },
     "performance": {"wins": 0, "total": 0, "win_rate": 0},
-    "logs": [],                 # Terminal Logs
+    "logs": [],                 
     "active_trades": [],
     "last_alert_time": 0,
     "last_long_alert": 0,  
@@ -159,7 +159,7 @@ def send_discord_alert(data, asset):
                 {"name": "⚖️ Risk Calc", "value": f"Risk: ${risk_usd} ({GLOBAL_STATE['settings']['risk_pct']}%)\n**Size: {lots} Lots**", "inline": False},
                 {"name": "Confidence", "value": f"{data['probability']}%", "inline": True}
             ],
-            "footer": {"text": f"ForwardFin V4.4 • Risk Engine Active"}
+            "footer": {"text": f"ForwardFin V4.5 • Precision Protocol"}
         }
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
         GLOBAL_STATE["last_alert_time"] = current_time
@@ -304,7 +304,7 @@ def get_recent_5m_swing(df_5m, bias):
 
 # --- WORKER 2: THE STRATEGY BRAIN ---
 def run_strategy_engine():
-    log_msg("SYS", "V4.4 Logic Loaded. 2.5 SD + Risk Engine Active.")
+    log_msg("SYS", "V4.5 Logic Loaded. Precision Mode Active.")
     while True:
         try:
             market = GLOBAL_STATE["market_data"]
@@ -341,7 +341,8 @@ def run_strategy_engine():
             
             bias = "NEUTRAL"
             prob = 50
-            narrative = "Scanning..."
+            # UPDATED: Fallback Narrative
+            narrative = "Scanning Market Structure..."
             setup = {"entry": 0, "tp": 0, "sl": 0, "size": 0, "valid": False}
             
             is_monitoring_smt = False
@@ -367,7 +368,7 @@ def run_strategy_engine():
                     sell_zone = high + (leg_range * 2.5)
 
                     if current_price < low:
-                        narrative = "⚠️ Asia Low Swept. Monitoring for 2.5 SD."
+                        narrative = f"⚠️ Asia Low Swept. Monitoring for 2.5 SD ({buy_zone:.2f})."
                         if current_price <= (buy_zone * 1.001): 
                             narrative = "🚨 KILL ZONE (2.5 SD). Checking Trigger..."
                             has_smt = check_smt_divergence(df, df_aux, "LOW")
@@ -382,7 +383,7 @@ def run_strategy_engine():
                                 setup = {"entry": current_price, "tp": tp2, "sl": sl_dynamic, "valid": True}
 
                     elif current_price > high:
-                        narrative = "⚠️ Asia High Swept. Monitoring for 2.5 SD."
+                        narrative = f"⚠️ Asia High Swept. Monitoring for 2.5 SD ({sell_zone:.2f})."
                         if current_price >= (sell_zone * 0.999):
                             narrative = "🚨 KILL ZONE (2.5 SD). Checking Trigger..."
                             has_smt = check_smt_divergence(df, df_aux, "HIGH")
@@ -395,6 +396,14 @@ def run_strategy_engine():
                                 narrative = "✅ SELL SIGNAL (2.5 SD Reversal)"
                                 if not has_smt: narrative += " (No SMT)"
                                 setup = {"entry": current_price, "tp": tp2, "sl": sl_dynamic, "valid": True}
+                    
+                    else:
+                        # UPDATED: Specific Narrative for Range
+                        narrative = f"📉 Consolidating inside Asia Range ({low:.2f} - {high:.2f}).\nWaiting for a Sweep."
+                
+                else:
+                    # UPDATED: Specific Narrative for Session
+                    narrative = "⏳ Asia Session Active (03:00-08:59 SAST).\nRecording Highs and Lows..."
 
             GLOBAL_STATE["prediction"] = {"bias": bias, "probability": prob, "narrative": narrative, "trade_setup": setup}
 
@@ -468,7 +477,7 @@ async def root():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ForwardFin V4.4 | Glass Box</title>
+    <title>ForwardFin V4.5 | Glass Box</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
@@ -616,7 +625,7 @@ async def root():
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-10">
                 <div class="space-y-6">
                     <div class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-900/30 text-emerald-400 text-xs font-semibold uppercase tracking-wide border border-emerald-800">
-                        V4.4 LIVE: GLASS BOX MODE
+                        V4.5 LIVE: GLASS BOX MODE
                     </div>
                     <h1 class="text-4xl sm:text-5xl font-extrabold text-white leading-tight">
                         Precision Entries,<br>
@@ -657,7 +666,7 @@ async def root():
                 <div>
                     <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Trade Style</label>
                     <select id="sel-style" onchange="pushSettings()" class="w-full mt-2 bg-slate-800 border border-slate-700 text-white text-sm rounded-lg block p-2.5">
-                        <option value="SNIPER" selected>🎯 Sniper (High Probability)</option>
+                        <option value="PRECISION" selected>🎯 Precision (High Probability)</option>
                         <option value="SCALP">⚡ Scalp (Fast Execution)</option>
                     </select>
                 </div>
@@ -674,7 +683,7 @@ async def root():
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-12">
                     <h2 class="text-3xl font-bold text-white">ForwardFin Academy</h2>
-                    <p class="mt-4 text-slate-400 max-w-2xl mx-auto">V4.4 Concepts: SMT Divergence & Liquidity.</p>
+                    <p class="mt-4 text-slate-400 max-w-2xl mx-auto">V4.5 Concepts: SMT Divergence & Liquidity.</p>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[400px]">
                     <div class="lg:col-span-4 glass rounded-xl overflow-hidden overflow-y-auto">
@@ -744,7 +753,7 @@ async def root():
 
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script>
-        // Init Chart Function - RESTORED
+        // Init Chart Function
         function initChart(symbol) {
             new TradingView.widget({
                 "autosize": true,
@@ -782,7 +791,6 @@ async def root():
         }
 
         async function setAsset(asset) {
-            // Function stub for buttons
             initChart(asset);
         }
         
@@ -816,9 +824,9 @@ async def root():
                 // Signal
                 const sigEl = document.getElementById('signal-badge');
                 sigEl.innerText = data.prediction.bias;
-                if(data.prediction.bias === "LONG") sigEl.className = "inline-block px-4 py-2 bg-emerald-600 rounded text-sm font-bold text-white animate-pulse";
-                else if(data.prediction.bias === "SHORT") sigEl.className = "inline-block px-4 py-2 bg-rose-600 rounded text-sm font-bold text-white animate-pulse";
-                else sigEl.className = "inline-block px-4 py-2 bg-slate-800 rounded text-sm font-bold text-slate-400";
+                if(data.prediction.bias === "LONG") sigEl.className = "inline-block px-4 py-2 bg-emerald-600 rounded text-xs font-bold text-white animate-pulse";
+                else if(data.prediction.bias === "SHORT") sigEl.className = "inline-block px-4 py-2 bg-rose-600 rounded text-xs font-bold text-white animate-pulse";
+                else sigEl.className = "inline-block px-4 py-2 bg-slate-800 rounded text-xs font-bold text-slate-400";
 
                 document.getElementById('ai-text').innerText = data.prediction.narrative;
                 const smtEl = document.getElementById('smt-status');
@@ -831,7 +839,7 @@ async def root():
                     if(smtElBig) { smtElBig.innerText = "SYNCED"; smtElBig.className = "text-xl font-black text-rose-500 mt-4"; }
                 }
 
-                // Setup (Restored)
+                // Setup
                 const setup = data.prediction.trade_setup;
                 const validEl = document.getElementById('setup-validity');
                 if(validEl) {
@@ -868,7 +876,7 @@ async def root():
             } catch(e) {}
         }
 
-        // --- CONTENT LOGIC (Restored) ---
+        // --- CONTENT LOGIC ---
         const lessons = [
             { title: "1. SMT Divergence", body: "<b>Smart Money Technique (SMT):</b> This is our 'Lie Detector'. Institutional algorithms often manipulate one index (like NQ) to grab liquidity while holding the other (like ES) steady.<br><br><b>The Rule:</b> If NQ sweeps a Low (makes a lower low) but ES fails to sweep its matching Low (makes a higher low), that is a 'Crack in Correlation'. It confirms that the move down was a trap to sell to retail traders before reversing higher." },
             { title: "2. The 'Kill Zone' (-2.5 STDV)", body: "<b>Why -2.5 Standard Deviations?</b> We do not guess bottoms. We use math. By projecting the Asia Range size (High - Low) downwards by a factor of 2.5, we identify a statistical 'Exhaustion Point'.<br><br>When price hits this zone, it is mathematically overextended relative to the session's volatility. This is where we stop analysing and start hunting for an entry." },
