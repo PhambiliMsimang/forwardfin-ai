@@ -759,6 +759,32 @@ async def root():
                             **The Logic:** If NQ makes a Lower Low (sweeping liquidity) but ES refuses to make a Lower Low (shows strength), this "Crack in Correlation" confirms that the NQ move was a fake-out to trap sellers. ForwardFin detects this divergence automatically to validate high-quality entries.
                         </p>
                     </div>
+
+                    <div class="feature-box p-6 rounded-xl">
+                        <div class="flex items-center mb-4">
+                            <span class="text-2xl mr-3">📰</span>
+                            <h3 class="text-xl font-bold text-amber-400">News Sentiment Scanner</h3>
+                        </div>
+                        <p class="text-slate-300 text-sm leading-relaxed mb-3">
+                            Markets react violently to high-impact news (CPI, FOMC, NFP). Trading through these events is gambling, not trading.
+                        </p>
+                        <p class="text-slate-400 text-xs italic">
+                            **The Logic:** The bot scans Yahoo Finance every 60 seconds for "Danger Words" (e.g., POWELL, RATES, JOBS). If detected within a 2-hour window, the system triggers a **Hard Freeze**. No trades are executed until the event passes, protecting you from slippage and spikes.
+                        </p>
+                    </div>
+
+                    <div class="feature-box p-6 rounded-xl">
+                        <div class="flex items-center mb-4">
+                            <span class="text-2xl mr-3">⚖️</span>
+                            <h3 class="text-xl font-bold text-blue-400">Dynamic Risk Engine</h3>
+                        </div>
+                        <p class="text-slate-300 text-sm leading-relaxed mb-3">
+                            Most traders blow up by guessing lot sizes. ForwardFin treats risk as a mathematical constant, not a variable.
+                        </p>
+                        <p class="text-slate-400 text-xs italic">
+                            **The Logic:** You set a risk percentage (e.g., 2%). The engine calculates the distance to your Stop Loss in points. It then solves the equation: `(Balance * Risk%) / Distance = Lot Size`. If volatility is high (wide stop), lot size shrinks. If volatility is low (tight stop), lot size expands. Your dollar risk remains constant.
+                        </p>
+                    </div>
                 </div>
             </div>
         </section>
@@ -863,6 +889,7 @@ async def root():
             });
         }
 
+        // --- API & UI LOGIC ---
         async function calibrate() {
             const val = document.getElementById('inp-cfd').value;
             if(!val) return;
@@ -885,16 +912,20 @@ async def root():
             initChart(asset);
         }
         
-        async function pushSettings() { }
+        async function pushSettings() {
+             // Function stub
+        }
 
         async function updateLoop() {
             try {
                 const res = await fetch('/api/live-data');
                 const data = await res.json();
 
+                // Top Bar
                 document.getElementById('nav-ticker').innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> ${data.settings.asset}: $${data.market_data.price.toLocaleString()}`;
                 if(data.market_data.server_time) document.getElementById('server-clock').innerText = data.market_data.server_time;
 
+                // News
                 const newsEl = document.getElementById('news-status');
                 if(data.news.is_danger) {
                     newsEl.className = "hidden md:block text-xs px-3 py-1 rounded bg-red-900/50 border border-red-500 text-red-200 animate-pulse";
@@ -904,14 +935,16 @@ async def root():
                     newsEl.innerText = "📰 News: Clear";
                 }
 
+                // Stats
                 document.getElementById('stat-offset').innerText = data.settings.offset.toFixed(2);
                 document.getElementById('price-display').innerText = "$" + data.market_data.price.toLocaleString(undefined, {minimumFractionDigits: 2});
                 
+                // Signal
                 const sigEl = document.getElementById('signal-badge');
                 sigEl.innerText = data.prediction.bias;
-                if(data.prediction.bias === "LONG") sigEl.className = "inline-block px-4 py-2 bg-emerald-600 rounded text-sm font-bold text-white animate-pulse";
-                else if(data.prediction.bias === "SHORT") sigEl.className = "inline-block px-4 py-2 bg-rose-600 rounded text-sm font-bold text-white animate-pulse";
-                else sigEl.className = "inline-block px-4 py-2 bg-slate-800 rounded text-sm font-bold text-slate-400";
+                if(data.prediction.bias === "LONG") sigEl.className = "inline-block px-4 py-2 bg-emerald-600 rounded text-xs font-bold text-white animate-pulse";
+                else if(data.prediction.bias === "SHORT") sigEl.className = "inline-block px-4 py-2 bg-rose-600 rounded text-xs font-bold text-white animate-pulse";
+                else sigEl.className = "inline-block px-4 py-2 bg-slate-800 rounded text-xs font-bold text-slate-400";
 
                 document.getElementById('ai-text').innerText = data.prediction.narrative;
                 const smtEl = document.getElementById('smt-status');
@@ -946,6 +979,7 @@ async def root():
                     }
                 }
 
+                // Session
                 const fibEl = document.getElementById('status-fib');
                 const sessionLow = data.market_data.session_low;
                 const sessionHigh = data.market_data.session_high;
