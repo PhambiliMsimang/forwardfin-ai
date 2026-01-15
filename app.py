@@ -889,7 +889,6 @@ async def root():
             });
         }
 
-        // --- API & UI LOGIC ---
         async function calibrate() {
             const val = document.getElementById('inp-cfd').value;
             if(!val) return;
@@ -912,20 +911,16 @@ async def root():
             initChart(asset);
         }
         
-        async function pushSettings() {
-             // Function stub
-        }
+        async function pushSettings() { }
 
         async function updateLoop() {
             try {
                 const res = await fetch('/api/live-data');
                 const data = await res.json();
 
-                // Top Bar
                 document.getElementById('nav-ticker').innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> ${data.settings.asset}: $${data.market_data.price.toLocaleString()}`;
                 if(data.market_data.server_time) document.getElementById('server-clock').innerText = data.market_data.server_time;
 
-                // News
                 const newsEl = document.getElementById('news-status');
                 if(data.news.is_danger) {
                     newsEl.className = "hidden md:block text-xs px-3 py-1 rounded bg-red-900/50 border border-red-500 text-red-200 animate-pulse";
@@ -935,16 +930,14 @@ async def root():
                     newsEl.innerText = "📰 News: Clear";
                 }
 
-                // Stats
                 document.getElementById('stat-offset').innerText = data.settings.offset.toFixed(2);
                 document.getElementById('price-display').innerText = "$" + data.market_data.price.toLocaleString(undefined, {minimumFractionDigits: 2});
                 
-                // Signal
                 const sigEl = document.getElementById('signal-badge');
                 sigEl.innerText = data.prediction.bias;
-                if(data.prediction.bias === "LONG") sigEl.className = "inline-block px-4 py-2 bg-emerald-600 rounded text-xs font-bold text-white animate-pulse";
-                else if(data.prediction.bias === "SHORT") sigEl.className = "inline-block px-4 py-2 bg-rose-600 rounded text-xs font-bold text-white animate-pulse";
-                else sigEl.className = "inline-block px-4 py-2 bg-slate-800 rounded text-xs font-bold text-slate-400";
+                if(data.prediction.bias === "LONG") sigEl.className = "inline-block px-4 py-2 bg-emerald-600 rounded text-sm font-bold text-white animate-pulse";
+                else if(data.prediction.bias === "SHORT") sigEl.className = "inline-block px-4 py-2 bg-rose-600 rounded text-sm font-bold text-white animate-pulse";
+                else sigEl.className = "inline-block px-4 py-2 bg-slate-800 rounded text-sm font-bold text-slate-400";
 
                 document.getElementById('ai-text').innerText = data.prediction.narrative;
                 const smtEl = document.getElementById('smt-status');
@@ -965,7 +958,6 @@ async def root():
                     else rsiEl.className = "text-xs font-bold text-emerald-500";
                 }
 
-                // Setup
                 const setup = data.prediction.trade_setup;
                 const validEl = document.getElementById('setup-validity');
                 if(validEl) {
@@ -979,7 +971,6 @@ async def root():
                     }
                 }
 
-                // Session
                 const fibEl = document.getElementById('status-fib');
                 const sessionLow = data.market_data.session_low;
                 const sessionHigh = data.market_data.session_high;
@@ -1002,7 +993,6 @@ async def root():
             } catch(e) {}
         }
 
-        // --- CONTENT LOGIC (UPDATED WITH EXCRUCIATING DETAIL) ---
         const lessons = [
             { title: "1. SMT Divergence", body: "<b>Smart Money Technique (SMT):</b> This is our 'Lie Detector'. Institutional algorithms often manipulate one index (like NQ) to grab liquidity while holding the other (like ES) steady.<br><br><b>The Rule:</b> If NQ sweeps a Low (makes a lower low) but ES fails to sweep its matching Low (makes a higher low), that is a 'Crack in Correlation'. It confirms that the move down was a trap to sell to retail traders before reversing higher." },
             { title: "2. The 'Kill Zone' (-2.5 STDV)", body: "<b>Why -2.5 Standard Deviations?</b> We do not guess bottoms. We use math. By projecting the Asia Range size (High - Low) downwards by a factor of 2.5, we identify a statistical 'Exhaustion Point'.<br><br>When price hits this zone, it is mathematically overextended relative to the session's volatility. This is where we stop analysing and start hunting for an entry." },
@@ -1021,11 +1011,12 @@ async def root():
             });
         }
         
+        // --- ARCHITECTURE SECTION UPDATED HERE ---
         const architectureData = [
             { title: "Data Ingestion", badge: "Infrastructure", description: "Connects to Yahoo Finance to fetch real-time 1-minute candle data for NQ=F and ES=F futures contracts.", components: ["yfinance", "Python Requests"] },
             { title: "Analysis Engine", badge: "Data Science", description: "Resamples 1m data to 5m to find STDV Zones. Calculates live Volatility and detects IFVGs.", components: ["Pandas Resample", "NumPy Math", "Custom Fib Scanner"] },
-            { title: "Strategy Core", badge: "Logic", description: "Hybrid 5m/1m Engine. Waits for -2.0 STDV on 5m, then hunts for 1m BOS+FVG triggers.", components: ["Multi-Timeframe Analysis", "Smart Money Logic"] },
-            { title: "Alerting Layer", badge: "Notification", description: "When V3 confidence is met (>85%), constructs a rich embed payload and fires it to the Discord Webhook.", components: ["Discord API", "JSON Payloads"] },
+            { title: "Strategy Core", badge: "Logic", description: "Hybrid 5m/1m Engine. Waits for 2.5 STDV on 5m, then hunts for 1m BOS+FVG triggers.", components: ["Multi-Timeframe Analysis", "Smart Money Logic"] },
+            { title: "Alerting Layer", badge: "Notification", description: "When V4.6 confidence is met (>85% via RSI & SMT), constructs a rich embed payload and fires it to the Discord Webhook.", components: ["Discord API", "JSON Payloads"] },
             { title: "User Interface", badge: "Frontend", description: "Responsive dashboard served via FastAPI. Updates DOM elements live via polling.", components: ["FastAPI", "Tailwind CSS", "Chart.js", "TradingView"] }
         ];
 
