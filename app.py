@@ -157,7 +157,7 @@ def send_discord_alert(data, asset):
                 {"name": "⚖️ Risk Calc", "value": f"Risk: ${risk_usd} ({GLOBAL_STATE['settings']['risk_pct']}%)\n**Size: {lots} Lots**", "inline": False},
                 {"name": "Confidence", "value": f"{data['probability']}%", "inline": True}
             ],
-            "footer": {"text": f"ForwardFin V4.6 • Drift-Proof Engine"}
+            "footer": {"text": f"ForwardFin V4.7 • Drift-Proof Engine"}
         }
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
         GLOBAL_STATE["last_alert_time"] = current_time
@@ -311,7 +311,7 @@ def get_recent_5m_swing(df_5m, bias):
 
 # --- WORKER 2: THE STRATEGY BRAIN ---
 def run_strategy_engine():
-    log_msg("SYS", "V4.6 Logic Loaded. RSI Guard Active.")
+    log_msg("SYS", "V4.7 Tuned Logic Loaded. RSI Guard Active.")
     while True:
         try:
             market = GLOBAL_STATE["market_data"]
@@ -372,16 +372,16 @@ def run_strategy_engine():
                 if asia_info['is_closed']: 
                     leg_range = high - low
                     
-                    # 2.5 SD LOGIC
+                    # 2.5 SD LOGIC (KEPT AS REQUESTED)
                     buy_zone = low - (leg_range * 2.5)
                     sell_zone = high + (leg_range * 2.5)
 
                     if current_price < low:
                         narrative = f"⚠️ Asia Low Swept. Monitoring for 2.5 SD."
                         
-                        # [NEW] V4.6 CRASH GUARD:
+                        # [UPDATED] V4.7 CRASH GUARD: RSI < 20 (Was 30)
                         if current_price <= (buy_zone * 1.001): 
-                            if current_rsi < 30:
+                            if current_rsi < 20: 
                                 narrative = f"⛔ WATERFALL: Price in Zone, but RSI {current_rsi:.1f} is too weak. Waiting for curl."
                             else:
                                 narrative = "🚨 KILL ZONE (2.5 SD). RSI OK. Checking Trigger..."
@@ -399,8 +399,8 @@ def run_strategy_engine():
                     elif current_price > high:
                         narrative = "⚠️ Asia High Swept. Monitoring for 2.5 SD."
                         if current_price >= (sell_zone * 0.999):
-                            # [NEW] V4.6 ROCKET GUARD:
-                            if current_rsi > 70:
+                            # [UPDATED] V4.7 ROCKET GUARD: RSI > 80 (Was 70)
+                            if current_rsi > 80:
                                 narrative = f"⛔ ROCKET: Price in Zone, but RSI {current_rsi:.1f} is too strong. Waiting for dip."
                             else:
                                 narrative = "🚨 KILL ZONE (2.5 SD). RSI OK. Checking Trigger..."
@@ -442,7 +442,8 @@ def run_strategy_engine():
 
         except Exception as e:
             log_msg("SYS", f"Brain Error: {e}")
-        time.sleep(1)
+        # [UPDATED] Sleep 3s (Was 10s)
+        time.sleep(3)
 
 # --- API ROUTES ---
 @app.get("/api/live-data")
@@ -469,7 +470,6 @@ async def update_settings(settings: SettingsUpdate):
 
 @app.post("/api/calibrate-offset")
 async def calibrate(c: CalibrationUpdate):
-    # This just updates the Visuals. Logic is now Relative.
     futures_price = GLOBAL_STATE["market_data"]["price"] 
     if futures_price > 0:
         new_offset = futures_price - c.current_cfd_price
@@ -493,7 +493,7 @@ async def root():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ForwardFin V4.6 | Drift-Proof</title>
+    <title>ForwardFin V4.7 | Drift-Proof</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
@@ -647,7 +647,7 @@ async def root():
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-10">
                 <div class="space-y-6">
                     <div class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-900/30 text-emerald-400 text-xs font-semibold uppercase tracking-wide border border-emerald-800">
-                        V4.6 LIVE: DRIFT-PROOF MODE
+                        V4.7 LIVE: DRIFT-PROOF MODE
                     </div>
                     <h1 class="text-4xl sm:text-5xl font-extrabold text-white leading-tight">
                         Precision Entries,<br>
@@ -658,7 +658,7 @@ async def root():
                         <span id="server-clock" class="font-bold text-slate-300">--:--:--</span>
                     </div>
                     <p class="text-lg text-slate-400 max-w-lg mt-4">
-                        ForwardFin V4.6 uses <strong>Relative Market Structure</strong> to detect Asia Sweeps regardless of Broker price drift. Includes <strong>RSI Waterfall Protection</strong>.
+                        ForwardFin V4.7 uses <strong>Relative Market Structure</strong> to detect Asia Sweeps regardless of Broker price drift. Includes <strong>RSI Waterfall Protection</strong>.
                     </p>
                 </div>
                 <div class="grid grid-cols-3 gap-4">
@@ -705,7 +705,7 @@ async def root():
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-12">
                     <h2 class="text-3xl font-bold text-white">System Capabilities & Logic Breakdown</h2>
-                    <p class="mt-4 text-slate-400 max-w-3xl mx-auto">Understanding the ForwardFin V4.6 Engine: How it protects your capital and finds precision entries in a chaotic market.</p>
+                    <p class="mt-4 text-slate-400 max-w-3xl mx-auto">Understanding the ForwardFin V4.7 Engine: How it protects your capital and finds precision entries in a chaotic market.</p>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     <div class="feature-box p-6 rounded-xl">
@@ -730,7 +730,7 @@ async def root():
                             The "Asia Sweep" strategy is a reversal system. However, sometimes the market doesn't reverse; it crashes (a "Waterfall"). Buying during a crash is account suicide.
                         </p>
                         <p class="text-slate-400 text-xs italic">
-                            **The Safety Mechanism:** Before sending a Signal, V4.6 checks the **Relative Strength Index (RSI)**. If price is in the Buy Zone but RSI is **< 30** (Extreme Momentum), the bot assumes a crash is happening and BLOCKS the trade. It waits for the "Curl" (RSI pointing up) to confirm buyers have stepped in.
+                            **The Safety Mechanism:** Before sending a Signal, V4.7 checks the **Relative Strength Index (RSI)**. If price is in the Buy Zone but RSI is **< 20** (Extreme Momentum), the bot assumes a crash is happening and BLOCKS the trade. It waits for the "Curl" (RSI pointing up) to confirm buyers have stepped in.
                         </p>
                     </div>
 
@@ -793,7 +793,7 @@ async def root():
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-12">
                     <h2 class="text-3xl font-bold text-white">ForwardFin Academy</h2>
-                    <p class="mt-4 text-slate-400 max-w-2xl mx-auto">V4.6 Concepts: SMT Divergence & Liquidity.</p>
+                    <p class="mt-4 text-slate-400 max-w-2xl mx-auto">V4.7 Concepts: SMT Divergence & Liquidity.</p>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[400px]">
                     <div class="lg:col-span-4 glass rounded-xl overflow-hidden overflow-y-auto">
@@ -889,6 +889,7 @@ async def root():
             });
         }
 
+        // --- API & UI LOGIC ---
         async function calibrate() {
             const val = document.getElementById('inp-cfd').value;
             if(!val) return;
@@ -911,16 +912,20 @@ async def root():
             initChart(asset);
         }
         
-        async function pushSettings() { }
+        async function pushSettings() {
+             // Function stub
+        }
 
         async function updateLoop() {
             try {
                 const res = await fetch('/api/live-data');
                 const data = await res.json();
 
+                // Top Bar
                 document.getElementById('nav-ticker').innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> ${data.settings.asset}: $${data.market_data.price.toLocaleString()}`;
                 if(data.market_data.server_time) document.getElementById('server-clock').innerText = data.market_data.server_time;
 
+                // News
                 const newsEl = document.getElementById('news-status');
                 if(data.news.is_danger) {
                     newsEl.className = "hidden md:block text-xs px-3 py-1 rounded bg-red-900/50 border border-red-500 text-red-200 animate-pulse";
@@ -930,9 +935,11 @@ async def root():
                     newsEl.innerText = "📰 News: Clear";
                 }
 
+                // Stats
                 document.getElementById('stat-offset').innerText = data.settings.offset.toFixed(2);
                 document.getElementById('price-display').innerText = "$" + data.market_data.price.toLocaleString(undefined, {minimumFractionDigits: 2});
                 
+                // Signal
                 const sigEl = document.getElementById('signal-badge');
                 sigEl.innerText = data.prediction.bias;
                 if(data.prediction.bias === "LONG") sigEl.className = "inline-block px-4 py-2 bg-emerald-600 rounded text-sm font-bold text-white animate-pulse";
@@ -958,6 +965,7 @@ async def root():
                     else rsiEl.className = "text-xs font-bold text-emerald-500";
                 }
 
+                // Setup
                 const setup = data.prediction.trade_setup;
                 const validEl = document.getElementById('setup-validity');
                 if(validEl) {
@@ -971,6 +979,7 @@ async def root():
                     }
                 }
 
+                // Session
                 const fibEl = document.getElementById('status-fib');
                 const sessionLow = data.market_data.session_low;
                 const sessionHigh = data.market_data.session_high;
@@ -993,6 +1002,7 @@ async def root():
             } catch(e) {}
         }
 
+        // --- CONTENT LOGIC (Restored) ---
         const lessons = [
             { title: "1. SMT Divergence", body: "<b>Smart Money Technique (SMT):</b> This is our 'Lie Detector'. Institutional algorithms often manipulate one index (like NQ) to grab liquidity while holding the other (like ES) steady.<br><br><b>The Rule:</b> If NQ sweeps a Low (makes a lower low) but ES fails to sweep its matching Low (makes a higher low), that is a 'Crack in Correlation'. It confirms that the move down was a trap to sell to retail traders before reversing higher." },
             { title: "2. The 'Kill Zone' (-2.5 STDV)", body: "<b>Why -2.5 Standard Deviations?</b> We do not guess bottoms. We use math. By projecting the Asia Range size (High - Low) downwards by a factor of 2.5, we identify a statistical 'Exhaustion Point'.<br><br>When price hits this zone, it is mathematically overextended relative to the session's volatility. This is where we stop analysing and start hunting for an entry." },
@@ -1011,12 +1021,17 @@ async def root():
             });
         }
         
-        // --- ARCHITECTURE SECTION UPDATED HERE ---
+        // --- ARCHITECTURE SECTION UPDATED HERE (V4.7) ---
         const architectureData = [
             { title: "Data Ingestion", badge: "Infrastructure", description: "Connects to Yahoo Finance to fetch real-time 1-minute candle data for NQ=F and ES=F futures contracts.", components: ["yfinance", "Python Requests"] },
             { title: "Analysis Engine", badge: "Data Science", description: "Resamples 1m data to 5m to find STDV Zones. Calculates live Volatility and detects IFVGs.", components: ["Pandas Resample", "NumPy Math", "Custom Fib Scanner"] },
+            
+            // [UPDATED] Corrected text to 2.5 STDV
             { title: "Strategy Core", badge: "Logic", description: "Hybrid 5m/1m Engine. Waits for 2.5 STDV on 5m, then hunts for 1m BOS+FVG triggers.", components: ["Multi-Timeframe Analysis", "Smart Money Logic"] },
+            
+            // [UPDATED] Corrected text to V4.6 Confidence
             { title: "Alerting Layer", badge: "Notification", description: "When V4.6 confidence is met (>85% via RSI & SMT), constructs a rich embed payload and fires it to the Discord Webhook.", components: ["Discord API", "JSON Payloads"] },
+            
             { title: "User Interface", badge: "Frontend", description: "Responsive dashboard served via FastAPI. Updates DOM elements live via polling.", components: ["FastAPI", "Tailwind CSS", "Chart.js", "TradingView"] }
         ];
 
