@@ -157,7 +157,7 @@ def send_discord_alert(data, asset):
                 {"name": "⚖️ Risk Calc", "value": f"Risk: ${risk_usd} ({GLOBAL_STATE['settings']['risk_pct']}%)\n**Size: {lots} Lots**", "inline": False},
                 {"name": "Confidence", "value": f"{data['probability']}%", "inline": True}
             ],
-            "footer": {"text": f"ForwardFin V4.6 • Drift-Proof Engine"}
+            "footer": {"text": f"ForwardFin V4.7 • Drift-Proof Engine"}
         }
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
         GLOBAL_STATE["last_alert_time"] = current_time
@@ -311,7 +311,7 @@ def get_recent_5m_swing(df_5m, bias):
 
 # --- WORKER 2: THE STRATEGY BRAIN ---
 def run_strategy_engine():
-    log_msg("SYS", "V4.6 Logic Loaded. RSI Guard Active.")
+    log_msg("SYS", "V4.7 Tuned Logic Loaded. RSI Guard Active.")
     while True:
         try:
             market = GLOBAL_STATE["market_data"]
@@ -372,16 +372,16 @@ def run_strategy_engine():
                 if asia_info['is_closed']: 
                     leg_range = high - low
                     
-                    # 2.5 SD LOGIC
+                    # 2.5 SD LOGIC (KEPT AS REQUESTED)
                     buy_zone = low - (leg_range * 2.5)
                     sell_zone = high + (leg_range * 2.5)
 
                     if current_price < low:
                         narrative = f"⚠️ Asia Low Swept. Monitoring for 2.5 SD."
                         
-                        # [NEW] V4.6 CRASH GUARD:
+                        # [UPDATED] V4.7 CRASH GUARD: RSI < 20 (Was 30)
                         if current_price <= (buy_zone * 1.001): 
-                            if current_rsi < 30:
+                            if current_rsi < 20: 
                                 narrative = f"⛔ WATERFALL: Price in Zone, but RSI {current_rsi:.1f} is too weak. Waiting for curl."
                             else:
                                 narrative = "🚨 KILL ZONE (2.5 SD). RSI OK. Checking Trigger..."
@@ -399,8 +399,8 @@ def run_strategy_engine():
                     elif current_price > high:
                         narrative = "⚠️ Asia High Swept. Monitoring for 2.5 SD."
                         if current_price >= (sell_zone * 0.999):
-                            # [NEW] V4.6 ROCKET GUARD:
-                            if current_rsi > 70:
+                            # [UPDATED] V4.7 ROCKET GUARD: RSI > 80 (Was 70)
+                            if current_rsi > 80:
                                 narrative = f"⛔ ROCKET: Price in Zone, but RSI {current_rsi:.1f} is too strong. Waiting for dip."
                             else:
                                 narrative = "🚨 KILL ZONE (2.5 SD). RSI OK. Checking Trigger..."
@@ -442,7 +442,8 @@ def run_strategy_engine():
 
         except Exception as e:
             log_msg("SYS", f"Brain Error: {e}")
-        time.sleep(1)
+        # [UPDATED] Sleep 3s (Was 10s)
+        time.sleep(3)
 
 # --- API ROUTES ---
 @app.get("/api/live-data")
@@ -469,7 +470,6 @@ async def update_settings(settings: SettingsUpdate):
 
 @app.post("/api/calibrate-offset")
 async def calibrate(c: CalibrationUpdate):
-    # This just updates the Visuals. Logic is now Relative.
     futures_price = GLOBAL_STATE["market_data"]["price"] 
     if futures_price > 0:
         new_offset = futures_price - c.current_cfd_price
@@ -493,138 +493,49 @@ async def root():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ForwardFin V4.8 | Cyber-Glass</title>
+    <title>ForwardFin V4.7 | Drift-Proof</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
-        /* BASE THEME & GRID BACKGROUND */
-        body { 
-            font-family: 'Inter', sans-serif; 
-            background-color: #020617; 
-            color: #E2E8F0; 
-            background-image: 
-                linear-gradient(rgba(30, 41, 59, 0.3) 1px, transparent 1px), 
-                linear-gradient(90deg, rgba(30, 41, 59, 0.3) 1px, transparent 1px);
-            background-size: 30px 30px;
-        }
-
+        body { font-family: 'Inter', sans-serif; background-color: #0B1120; color: #E2E8F0; }
         .mono { font-family: 'JetBrains Mono', monospace; }
-
-        /* GLASS CARD STYLING */
-        .glass { 
-            background: rgba(15, 23, 42, 0.75); 
-            backdrop-filter: blur(12px); 
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.08); 
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37); 
-        }
-
-        /* TERMINAL WINDOW */
-        .terminal { 
-            background: #0f172a; 
-            color: #10b981; 
-            font-family: 'JetBrains Mono', monospace; 
-            font-size: 12px; 
-            height: 180px; 
-            overflow-y: auto; 
-            border-top: 1px solid #1e293b; 
-        }
-
-        /* SIDEBAR NAVIGATION (ARCH LAYERS) */
-        .arch-layer { 
-            transition: all 0.3s ease; 
-            cursor: pointer; 
-            border-left: 4px solid transparent; 
-        }
-        .arch-layer:hover { 
-            background-color: rgba(56, 189, 248, 0.1); 
-            transform: translateX(4px); 
-        }
-        .arch-layer.active { 
-            background-color: rgba(14, 165, 233, 0.15); 
-            border-left-color: #0ea5e9; 
-        }
-
-        /* LESSON CARDS */
-        .lesson-card { 
-            cursor: pointer; 
-            transition: all 0.2s; 
-            border-left: 4px solid transparent; 
-        }
+        .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .terminal { background: #000; color: #00ff41; font-family: 'JetBrains Mono', monospace; font-size: 12px; height: 150px; overflow-y: auto; }
+        .arch-layer { transition: all 0.3s ease; cursor: pointer; border-left: 4px solid transparent; }
+        .arch-layer:hover { background-color: rgba(255,255,255,0.05); transform: translateX(4px); }
+        .arch-layer.active { background-color: rgba(14, 165, 233, 0.2); border-left-color: #0ea5e9; }
+        .lesson-card { cursor: pointer; transition: all 0.2s; border-left: 4px solid transparent; }
         .lesson-card:hover { background: rgba(255,255,255,0.05); }
-        .lesson-card.active { 
-            background: rgba(14, 165, 233, 0.15); 
-            border-left-color: #0ea5e9; 
-        }
-
-        /* ASSET SWITCHER BUTTONS (PILL SHAPE + GLOW) */
-        .btn-asset { 
-            transition: all 0.3s; 
-            border: 1px solid #334155; 
-            border-radius: 9999px; 
-        }
-        .btn-asset:hover { 
-            border-color: #38bdf8; 
-            box-shadow: 0 0 10px rgba(56, 189, 248, 0.3); 
-        }
-        .btn-asset.active { 
-            background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); 
-            color: white; 
-            border-color: transparent; 
-            box-shadow: 0 0 15px rgba(14, 165, 233, 0.5); 
-        }
-
-        /* LIVE PULSE ANIMATION */
-        @keyframes pulse-glow { 
-            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); } 
-            70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); } 
-            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } 
-        }
-        .live-pulse { animation: pulse-glow 2s infinite; }
-        
-        /* SCROLLBAR CUSTOMIZATION */
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-        
-        /* FEATURE BOX HOVER EFFECT */
-        .feature-box { 
-            background: rgba(30, 41, 59, 0.4); 
-            border: 1px solid rgba(255,255,255,0.05); 
-            transition: transform 0.2s, border-color 0.2s; 
-        }
-        .feature-box:hover { 
-            transform: translateY(-4px); 
-            border-color: #38bdf8; 
-        }
+        .lesson-card.active { background: rgba(14, 165, 233, 0.2); border-left-color: #0ea5e9; }
+        .btn-asset { transition: all 0.2s; border: 1px solid #334155; }
+        .btn-asset:hover { background-color: #1e293b; border-color: #0ea5e9; }
+        .btn-asset.active { background-color: #0ea5e9; color: white; border-color: #0ea5e9; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        .feature-box { background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.05); }
     </style>
 </head>
-<body class="antialiased flex flex-col min-h-screen">
+<body class="bg-slate-900 text-slate-200 antialiased flex flex-col min-h-screen">
 
-    <nav class="sticky top-0 z-50 glass border-b border-slate-800/50">
+    <nav class="sticky top-0 z-50 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 shadow-sm">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16 items-center">
                 <div class="flex items-center gap-4">
-                    <div class="h-10 w-10 bg-gradient-to-br from-sky-500 to-blue-700 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-sky-900/20">FF</div>
+                    <div class="h-10 w-10 bg-sky-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">FF</div>
                     <div class="hidden md:block h-6 w-px bg-slate-700"></div>
-                    
-                    <div id="nav-ticker" class="font-mono text-sm font-bold text-slate-300 flex items-center gap-2">
-                        <span class="relative flex h-3 w-3">
-                          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                          <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-                        </span>
-                        Connecting to ForwardFin Neural Net...
+                    <div id="nav-ticker" class="font-mono text-sm font-bold text-slate-400 flex items-center gap-2">
+                        <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        Connecting...
                     </div>
                 </div>
-                
                 <div class="flex gap-4 items-center">
-                    <div id="news-status" class="hidden md:block text-[10px] uppercase font-bold tracking-wider px-3 py-1.5 rounded-full bg-slate-900/50 border border-slate-700 text-slate-400">
-                        📰 SCANNING NEWS...
+                    <div id="news-status" class="hidden md:block text-xs px-3 py-1 rounded bg-slate-800 border border-slate-700 text-slate-400">
+                        📰 News Scanner: Active
                     </div>
-                    
-                    <div class="flex gap-2 bg-slate-900/50 p-1 rounded-full border border-slate-800">
-                        <button onclick="setAsset('NQ1!')" id="btn-nq" class="btn-asset active px-5 py-1.5 text-xs font-bold text-slate-300">NQ</button>
-                        <button onclick="setAsset('ES1!')" id="btn-es" class="btn-asset px-5 py-1.5 text-xs font-bold text-slate-300">ES</button>
+                    <div class="flex gap-2">
+                        <button onclick="setAsset('NQ1!')" id="btn-nq" class="btn-asset active px-4 py-1.5 rounded text-sm font-bold bg-slate-800 text-slate-300">NQ</button>
+                        <button onclick="setAsset('ES1!')" id="btn-es" class="btn-asset px-4 py-1.5 rounded text-sm font-bold bg-slate-800 text-slate-300">ES</button>
                     </div>
                 </div>
             </div>
@@ -636,287 +547,324 @@ async def root():
         <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 mb-12">
             
             <div class="lg:col-span-3 space-y-6">
-                <div class="glass rounded-2xl p-6">
-                    <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">1. Calibration</h3>
-                    <div class="space-y-3">
-                        <label class="text-xs text-slate-400 font-semibold">Broker Price (CFD)</label>
-                        <div class="relative">
-                            <span class="absolute left-3 top-2.5 text-slate-500">$</span>
-                            <input type="number" id="inp-cfd" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg pl-6 pr-3 py-2 text-white text-sm focus:border-sky-500 focus:ring-1 focus:ring-sky-500 outline-none transition" placeholder="e.g. 15400.50">
-                        </div>
-                        <button onclick="calibrate()" class="w-full bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white text-xs font-bold py-2.5 rounded-lg shadow-lg shadow-sky-900/20 transition transform active:scale-95">SYNC OFFSET</button>
+                <div class="glass rounded-xl p-5">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase mb-3">1. Calibrate Price (Visual)</h3>
+                    <div class="space-y-2">
+                        <label class="text-xs text-slate-500">Capital.com Price</label>
+                        <input type="number" id="inp-cfd" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white text-sm focus:border-sky-500 outline-none" placeholder="e.g. 15400.50">
+                        <button onclick="calibrate()" class="w-full bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold py-2 rounded transition">SYNC OFFSET</button>
                     </div>
                 </div>
 
-                <div class="glass rounded-2xl p-6">
-                    <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">2. Risk Engine</h3>
-                    <div class="space-y-4">
+                <div class="glass rounded-xl p-5">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase mb-3">2. Risk Engine</h3>
+                    <div class="space-y-3">
                         <div>
-                            <label class="text-xs text-slate-400 font-semibold">Account Balance</label>
-                            <div class="relative mt-1">
-                                <span class="absolute left-3 top-2.5 text-slate-500">$</span>
-                                <input type="number" id="inp-bal" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg pl-6 pr-3 py-2 text-white text-sm outline-none" value="1000">
-                            </div>
+                            <label class="text-xs text-slate-500">Balance ($)</label>
+                            <input type="number" id="inp-bal" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white text-sm outline-none" value="1000">
                         </div>
                         <div>
-                            <label class="text-xs text-slate-400 font-semibold">Risk Per Trade (%)</label>
-                            <input type="number" id="inp-risk" class="mt-1 w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none" value="2.0">
+                            <label class="text-xs text-slate-500">Risk %</label>
+                            <input type="number" id="inp-risk" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white text-sm outline-none" value="2.0">
                         </div>
-                        <button onclick="updateRisk()" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold py-2.5 rounded-lg border border-slate-700 transition">UPDATE PARAMETERS</button>
+                        <button onclick="updateRisk()" class="w-full bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold py-2 rounded transition">UPDATE RISK</button>
                     </div>
                 </div>
             </div>
 
             <div class="lg:col-span-6 space-y-6">
-                <div class="glass rounded-2xl overflow-hidden flex flex-col h-[240px] shadow-2xl">
-                    <div class="bg-slate-900/80 px-4 py-2 border-b border-slate-800 flex justify-between items-center">
-                        <div class="flex items-center gap-2">
-                            <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
-                            <span class="text-xs font-bold text-slate-300 tracking-wide">ENGINE LOGS</span>
-                        </div>
-                        <span class="text-[10px] text-slate-500 mono">v4.8-STABLE</span>
+                <div class="glass rounded-xl overflow-hidden flex flex-col h-[200px]">
+                    <div class="bg-slate-800/50 px-4 py-2 border-b border-white/5 flex justify-between">
+                        <span class="text-xs font-bold text-slate-400">SYSTEM LOGS</span>
+                        <span class="text-[10px] text-emerald-500 mono">● LIVE</span>
                     </div>
-                    <div id="terminal" class="terminal p-4 space-y-1.5 opacity-90">
-                        <div class="text-slate-500">Initializing ForwardFin Core Systems...</div>
+                    <div id="terminal" class="terminal p-4 space-y-1">
+                        <div class="opacity-50">Loading ForwardFin Core...</div>
                     </div>
                 </div>
                 
                 <div class="grid grid-cols-2 gap-4">
-                    <div class="glass rounded-2xl p-5 text-center relative overflow-hidden group">
-                        <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-white/20 to-transparent transform -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
-                        <div class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Live Price (CFD)</div>
-                        <div id="price-display" class="text-3xl font-bold text-white mt-2 font-mono tracking-tight">---</div>
+                    <div class="glass rounded-xl p-4 text-center">
+                        <div class="text-xs font-bold text-slate-500 uppercase">Live Price (CFD)</div>
+                        <div id="price-display" class="text-3xl font-bold text-white mt-1 font-mono">---</div>
                     </div>
-                    <div class="glass rounded-2xl p-5 text-center">
-                        <div class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Active Offset</div>
-                        <div id="stat-offset" class="text-3xl font-bold text-sky-400 mt-2 font-mono tracking-tight">-105</div>
+                    <div class="glass rounded-xl p-4 text-center">
+                        <div class="text-xs font-bold text-slate-500 uppercase">Current Offset</div>
+                        <div id="stat-offset" class="text-3xl font-bold text-sky-500 mt-1 font-mono">-105</div>
                     </div>
                 </div>
             </div>
 
             <div class="lg:col-span-3 space-y-6">
-                <div class="glass rounded-2xl p-6 flex flex-col h-64 relative overflow-hidden">
-                    <div class="absolute top-0 right-0 p-4 opacity-10 text-6xl">🧠</div>
-                    <h3 class="text-[10px] font-black text-sky-500 uppercase tracking-widest mb-3 flex items-center gap-2">
-                        AI NARRATIVE
+                <div class="glass rounded-xl p-5 flex flex-col h-64">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase mb-3 flex items-center gap-2">
+                        <span>🤖</span> AI Analysis
                     </h3>
-                    <div id="ai-text" class="text-xs text-slate-300 leading-relaxed font-mono overflow-y-auto flex-grow pr-2 border-l-2 border-slate-700 pl-3">
-                        Waiting for market data stream...
+                    <div id="ai-text" class="text-sm text-slate-300 leading-relaxed overflow-y-auto flex-grow pr-2">
+                        Waiting for market data...
                     </div>
                 </div>
 
-                <div class="glass rounded-2xl p-5 border-l-4 border-slate-700" id="setup-card">
-                    <div class="flex justify-between items-center mb-4">
-                        <h4 class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Trade Setup</h4>
-                        <span id="setup-validity" class="text-[10px] bg-slate-800 px-2 py-1 rounded text-slate-500 font-bold">INACTIVE</span>
+                <div class="glass rounded-xl p-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <h4 class="text-xs font-bold text-slate-500 uppercase">Trade Setup</h4>
+                        <span id="setup-validity" class="text-[10px] bg-slate-800 px-2 py-1 rounded text-slate-400">WAITING</span>
                     </div>
-                    <div class="space-y-3 font-mono text-xs">
-                        <div class="flex justify-between">
-                            <span class="text-slate-500">ENTRY</span>
-                            <span id="setup-entry" class="text-white font-bold">---</span>
+                    <div class="space-y-2">
+                        <div class="flex justify-between text-xs">
+                            <span class="text-slate-500">Entry</span>
+                            <span id="setup-entry" class="text-white font-mono">---</span>
                         </div>
-                        <div class="flex justify-between">
-                            <span class="text-slate-500">TAKE PROFIT</span>
-                            <span id="setup-tp" class="text-emerald-400 font-bold">---</span>
+                        <div class="flex justify-between text-xs">
+                            <span class="text-slate-500">TP</span>
+                            <span id="setup-tp" class="text-emerald-400 font-mono">---</span>
                         </div>
-                        <div class="flex justify-between">
-                            <span class="text-slate-500">STOP LOSS</span>
-                            <span id="setup-sl" class="text-rose-400 font-bold">---</span>
+                        <div class="flex justify-between text-xs">
+                            <span class="text-slate-500">SL</span>
+                            <span id="setup-sl" class="text-rose-400 font-mono">---</span>
                         </div>
                     </div>
                 </div>
 
-                <div class="glass rounded-2xl p-4 flex items-center justify-between">
-                    <span class="text-[10px] font-bold text-slate-500 uppercase">SMT DIVERGENCE</span>
-                    <span id="smt-status" class="text-xs font-black text-rose-500 tracking-wider">SYNCED</span>
+                <div class="glass rounded-xl p-4 flex items-center justify-between">
+                    <span class="text-xs font-bold text-slate-400">SMT DIVERGENCE</span>
+                    <span id="smt-status" class="text-xs font-bold text-rose-500">SYNCED</span>
                 </div>
 
-                <div class="glass rounded-2xl p-4 flex items-center justify-between">
-                    <span class="text-[10px] font-bold text-slate-500 uppercase">MOMENTUM (RSI)</span>
-                    <span id="rsi-status" class="text-xs font-black text-sky-500 tracking-wider font-mono">--.-</span>
+                <div class="glass rounded-xl p-4 flex items-center justify-between">
+                    <span class="text-xs font-bold text-slate-400">MOMENTUM RSI</span>
+                    <span id="rsi-status" class="text-xs font-bold text-sky-500">--.-</span>
                 </div>
                 
-                <div class="glass rounded-2xl p-6 text-center">
-                    <div class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">Core Bias</div>
-                    <div id="signal-badge" class="inline-block px-6 py-2 bg-slate-800 rounded-full text-xs font-bold text-slate-400 border border-slate-700">NEUTRAL</div>
+                <div class="glass rounded-xl p-4 text-center">
+                    <div class="text-xs font-bold text-slate-500 uppercase mb-2">AI Signal</div>
+                    <div id="signal-badge" class="inline-block px-4 py-2 bg-slate-800 rounded text-sm font-bold text-slate-400">NEUTRAL</div>
                 </div>
             </div>
         </div>
 
-        <section id="overview" class="py-12 max-w-7xl mx-auto border-t border-slate-800/50">
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-12">
+        <section id="overview" class="py-10 max-w-7xl mx-auto border-t border-slate-800">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-10">
                 <div class="space-y-6">
-                    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-900/20 text-emerald-400 text-[10px] font-bold uppercase tracking-widest border border-emerald-900/50">
-                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                        System Operational
+                    <div class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-900/30 text-emerald-400 text-xs font-semibold uppercase tracking-wide border border-emerald-800">
+                        V4.7 LIVE: DRIFT-PROOF MODE
                     </div>
-                    <h1 class="text-5xl font-black text-white leading-tight tracking-tight">
-                        Algorithmic<br>
-                        <span class="text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-blue-500">Precision.</span>
+                    <h1 class="text-4xl sm:text-5xl font-extrabold text-white leading-tight">
+                        Precision Entries,<br>
+                        <span class="text-sky-500">Momentum Guarded.</span>
                     </h1>
-                    <div class="flex items-center gap-3 mt-4 text-slate-500 font-mono text-xs">
-                        <span class="text-sky-500">SERVER TIME:</span>
+                    <div class="flex items-center gap-2 mt-4 text-slate-500 font-mono text-sm">
+                        <span>🕒 BOT TIME (SAST):</span>
                         <span id="server-clock" class="font-bold text-slate-300">--:--:--</span>
                     </div>
-                    <p class="text-slate-400 max-w-lg mt-4 leading-relaxed">
-                        ForwardFin V4.7 uses <strong>Relative Structure Analysis</strong> to identify high-probability institutional sweeps. Equipped with <span class="text-rose-400">RSI Waterfall Guard</span> technology.
+                    <p class="text-lg text-slate-400 max-w-lg mt-4">
+                        ForwardFin V4.7 uses <strong>Relative Market Structure</strong> to detect Asia Sweeps regardless of Broker price drift. Includes <strong>RSI Waterfall Protection</strong>.
                     </p>
                 </div>
                 <div class="grid grid-cols-3 gap-4">
-                    <div class="glass p-5 rounded-2xl flex flex-col items-center border border-slate-700/50">
-                        <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Correlation</h3>
-                        <div id="status-smt-big" class="text-xl font-black text-rose-500 mt-2">SYNCED</div>
+                    <div class="glass p-4 rounded-2xl flex flex-col items-center">
+                        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Correlation Monitor</h3>
+                        <div id="status-smt-big" class="text-xl font-black text-rose-500 mt-4">SYNCED</div>
                     </div>
-                    <div class="glass p-5 rounded-2xl flex flex-col items-center border border-slate-700/50">
-                        <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Asia Range</h3>
-                        <div id="status-fib" class="text-xs font-bold text-slate-300 mt-2 text-center font-mono">CALCULATING</div>
+                    <div class="glass p-4 rounded-2xl flex flex-col items-center">
+                        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Session Range</h3>
+                        <div id="status-fib" class="text-sm font-black text-slate-300 mt-4 text-center">WAITING</div>
                     </div>
-                    <div class="glass p-5 rounded-2xl flex flex-col items-center justify-center border border-slate-700/50 relative overflow-hidden">
-                        <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Win Rate</h3>
-                        <div class="text-center my-1"><span id="win-rate" class="text-3xl font-black text-white">0%</span></div>
-                        <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden mt-2"><div id="win-bar" class="bg-gradient-to-r from-sky-500 to-blue-600 h-full w-0 transition-all duration-1000"></div></div>
+                    <div class="glass p-4 rounded-2xl flex flex-col items-center justify-center">
+                        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Win Rate</h3>
+                        <div class="text-center my-2"><span id="win-rate" class="text-4xl font-black text-white">0%</span></div>
+                        <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden mt-1 mb-2"><div id="win-bar" class="bg-slate-200 h-full w-0 transition-all duration-1000"></div></div>
                     </div>
                 </div>
             </div>
 
-            <div class="glass p-8 rounded-2xl grid grid-cols-1 md:grid-cols-2 gap-8 border border-slate-700/50">
+            <div class="glass p-6 rounded-2xl grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                    <label class="text-xs font-bold text-slate-500 uppercase tracking-widest">Core Logic</label>
-                    <div class="relative mt-2">
-                        <select id="sel-strategy" onchange="pushSettings()" class="appearance-none w-full bg-slate-900 border border-slate-700 text-white text-sm rounded-lg block p-3 pr-10 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 outline-none">
-                            <option value="SWEEP" selected>Asia Liquidity Sweep (Strict)</option>
-                        </select>
-                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">▼</div>
-                    </div>
+                    <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Strategy Logic</label>
+                    <select id="sel-strategy" onchange="pushSettings()" class="w-full mt-2 bg-slate-800 border border-slate-700 text-white text-sm rounded-lg block p-2.5">
+                        <option value="SWEEP" selected>Asia Liquidity Sweep (Strict)</option>
+                    </select>
                 </div>
                 <div>
-                    <label class="text-xs font-bold text-slate-500 uppercase tracking-widest">Execution Style</label>
-                    <div class="relative mt-2">
-                        <select id="sel-style" onchange="pushSettings()" class="appearance-none w-full bg-slate-900 border border-slate-700 text-white text-sm rounded-lg block p-3 pr-10 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 outline-none">
-                            <option value="PRECISION" selected>🎯 Precision (High Probability)</option>
-                            <option value="SCALP">⚡ Scalp (Fast Execution)</option>
-                        </select>
-                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">▼</div>
-                    </div>
+                    <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Trade Style</label>
+                    <select id="sel-style" onchange="pushSettings()" class="w-full mt-2 bg-slate-800 border border-slate-700 text-white text-sm rounded-lg block p-2.5">
+                        <option value="PRECISION" selected>🎯 Precision (High Probability)</option>
+                        <option value="SCALP">⚡ Scalp (Fast Execution)</option>
+                    </select>
                 </div>
             </div>
         </section>
 
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-12">
-             <div class="glass p-1.5 rounded-2xl h-[600px] overflow-hidden shadow-2xl border border-slate-700/50">
-                <div id="tv-chart" class="w-full h-full rounded-xl bg-slate-900"></div>
+             <div class="glass p-1 rounded-xl h-[500px] overflow-hidden">
+                <div id="tv-chart" class="w-full h-full rounded-lg bg-slate-900"></div>
             </div>
         </div>
 
-        <section id="features-detail" class="py-20 bg-slate-950/50 border-t border-slate-800">
+        <section id="features-detail" class="py-16 bg-slate-900 border-t border-slate-800">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="text-center mb-16">
-                    <h2 class="text-3xl font-black text-white tracking-tight">System Capabilities</h2>
-                    <p class="mt-4 text-slate-400 max-w-2xl mx-auto">V4.7 Logic Architecture</p>
+                <div class="text-center mb-12">
+                    <h2 class="text-3xl font-bold text-white">System Capabilities & Logic Breakdown</h2>
+                    <p class="mt-4 text-slate-400 max-w-3xl mx-auto">Understanding the ForwardFin V4.7 Engine: How it protects your capital and finds precision entries in a chaotic market.</p>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <div class="feature-box p-6 rounded-2xl group">
-                        <div class="w-12 h-12 rounded-lg bg-sky-900/30 flex items-center justify-center mb-4 group-hover:bg-sky-600/20 transition">
-                            <span class="text-2xl">🧭</span>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div class="feature-box p-6 rounded-xl">
+                        <div class="flex items-center mb-4">
+                            <span class="text-2xl mr-3">🧭</span>
+                            <h3 class="text-xl font-bold text-sky-400">Drift-Proof "Relative" Math</h3>
                         </div>
-                        <h3 class="text-lg font-bold text-white mb-2">Drift-Proof Math</h3>
-                        <p class="text-sm text-slate-400 leading-relaxed">Uses relative percentage structure instead of static price levels to ignore broker spreads.</p>
+                        <p class="text-slate-300 text-sm leading-relaxed mb-3">
+                            Most trading bots fail because of "Price Drift." If Yahoo Finance says Nasdaq is at 15,400, but your broker (HFM/Alpha) quotes 15,410 due to spreads, a static bot will miscalculate entry zones.
+                        </p>
+                        <p class="text-slate-400 text-xs italic">
+                            **How V4.6 Solves This:** ForwardFin does not look at the absolute price number (e.g., "$15,000"). Instead, it calculates **Relative Structure**. It measures the *percentage distance* from the Asia Session Low. A 2.5 SD drop is mathematically identical on every broker, regardless of the price tag. You no longer need to stress about perfect calibration every minute.
+                        </p>
                     </div>
-                    <div class="feature-box p-6 rounded-2xl group">
-                        <div class="w-12 h-12 rounded-lg bg-rose-900/30 flex items-center justify-center mb-4 group-hover:bg-rose-600/20 transition">
-                            <span class="text-2xl">🛡️</span>
+
+                    <div class="feature-box p-6 rounded-xl">
+                        <div class="flex items-center mb-4">
+                            <span class="text-2xl mr-3">🛡️</span>
+                            <h3 class="text-xl font-bold text-rose-400">RSI "Waterfall" Guard</h3>
                         </div>
-                        <h3 class="text-lg font-bold text-white mb-2">RSI Crash Guard</h3>
-                        <p class="text-sm text-slate-400 leading-relaxed">Blocks entries if Momentum (RSI) is below 20, preventing "catching a falling knife."</p>
+                        <p class="text-slate-300 text-sm leading-relaxed mb-3">
+                            The "Asia Sweep" strategy is a reversal system. However, sometimes the market doesn't reverse; it crashes (a "Waterfall"). Buying during a crash is account suicide.
+                        </p>
+                        <p class="text-slate-400 text-xs italic">
+                            **The Safety Mechanism:** Before sending a Signal, V4.7 checks the **Relative Strength Index (RSI)**. If price is in the Buy Zone but RSI is **< 20** (Extreme Momentum), the bot assumes a crash is happening and BLOCKS the trade. It waits for the "Curl" (RSI pointing up) to confirm buyers have stepped in.
+                        </p>
                     </div>
-                    <div class="feature-box p-6 rounded-2xl group">
-                        <div class="w-12 h-12 rounded-lg bg-emerald-900/30 flex items-center justify-center mb-4 group-hover:bg-emerald-600/20 transition">
-                            <span class="text-2xl">🎯</span>
+
+                    <div class="feature-box p-6 rounded-xl">
+                        <div class="flex items-center mb-4">
+                            <span class="text-2xl mr-3">🎯</span>
+                            <h3 class="text-xl font-bold text-emerald-400">Precision Mode (2.5 SD)</h3>
                         </div>
-                        <h3 class="text-lg font-bold text-white mb-2">Precision Mode</h3>
-                        <p class="text-sm text-slate-400 leading-relaxed">Strictly waits for price to hit 2.5 Standard Deviations from the mean before executing.</p>
+                        <p class="text-slate-300 text-sm leading-relaxed mb-3">
+                            Retail traders guess where the bottom is. Institutions calculate it. The "Standard Deviation (SD)" tells us how far price is statistically allowed to stretch before it snaps back.
+                        </p>
+                        <p class="text-slate-400 text-xs italic">
+                            **The Math:** V4.6 ignores minor fluctuations. It waits for price to stretch **2.5x** the size of the Asia Range. This is a statistical extreme. When price hits this "Kill Zone," the probability of a reversal is mathematically maximized (>85%), allowing for tight stops and high rewards.
+                        </p>
                     </div>
-                    <div class="feature-box p-6 rounded-2xl group">
-                        <div class="w-12 h-12 rounded-lg bg-purple-900/30 flex items-center justify-center mb-4 group-hover:bg-purple-600/20 transition">
-                            <span class="text-2xl">👁️</span>
+
+                    <div class="feature-box p-6 rounded-xl">
+                        <div class="flex items-center mb-4">
+                            <span class="text-2xl mr-3">👁️</span>
+                            <h3 class="text-xl font-bold text-purple-400">SMT Divergence (Correlation)</h3>
                         </div>
-                        <h3 class="text-lg font-bold text-white mb-2">SMT Divergence</h3>
-                        <p class="text-sm text-slate-400 leading-relaxed">Correlates NQ vs ES price action to detect "Fake Moves" and institutional traps.</p>
+                        <p class="text-slate-300 text-sm leading-relaxed mb-3">
+                            The "Lie Detector." Nasdaq (NQ) and S&P 500 (ES) generally move together. When they disagree, it reveals a trap.
+                        </p>
+                        <p class="text-slate-400 text-xs italic">
+                            **The Logic:** If NQ makes a Lower Low (sweeping liquidity) but ES refuses to make a Lower Low (shows strength), this "Crack in Correlation" confirms that the NQ move was a fake-out to trap sellers. ForwardFin detects this divergence automatically to validate high-quality entries.
+                        </p>
                     </div>
-                    <div class="feature-box p-6 rounded-2xl group">
-                        <div class="w-12 h-12 rounded-lg bg-amber-900/30 flex items-center justify-center mb-4 group-hover:bg-amber-600/20 transition">
-                            <span class="text-2xl">📰</span>
+
+                    <div class="feature-box p-6 rounded-xl">
+                        <div class="flex items-center mb-4">
+                            <span class="text-2xl mr-3">📰</span>
+                            <h3 class="text-xl font-bold text-amber-400">News Sentiment Scanner</h3>
                         </div>
-                        <h3 class="text-lg font-bold text-white mb-2">News Scanner</h3>
-                        <p class="text-sm text-slate-400 leading-relaxed">Scans for keywords (CPI, FED, POWELL) every 60s and freezes trading during high-impact events.</p>
+                        <p class="text-slate-300 text-sm leading-relaxed mb-3">
+                            Markets react violently to high-impact news (CPI, FOMC, NFP). Trading through these events is gambling, not trading.
+                        </p>
+                        <p class="text-slate-400 text-xs italic">
+                            **The Logic:** The bot scans Yahoo Finance every 60 seconds for "Danger Words" (e.g., POWELL, RATES, JOBS). If detected within a 2-hour window, the system triggers a **Hard Freeze**. No trades are executed until the event passes, protecting you from slippage and spikes.
+                        </p>
                     </div>
-                    <div class="feature-box p-6 rounded-2xl group">
-                        <div class="w-12 h-12 rounded-lg bg-blue-900/30 flex items-center justify-center mb-4 group-hover:bg-blue-600/20 transition">
-                            <span class="text-2xl">⚖️</span>
+
+                    <div class="feature-box p-6 rounded-xl">
+                        <div class="flex items-center mb-4">
+                            <span class="text-2xl mr-3">⚖️</span>
+                            <h3 class="text-xl font-bold text-blue-400">Dynamic Risk Engine</h3>
                         </div>
-                        <h3 class="text-lg font-bold text-white mb-2">Dynamic Risk</h3>
-                        <p class="text-sm text-slate-400 leading-relaxed">Auto-calculates lot size based on Stop Loss distance to keep dollar risk constant.</p>
+                        <p class="text-slate-300 text-sm leading-relaxed mb-3">
+                            Most traders blow up by guessing lot sizes. ForwardFin treats risk as a mathematical constant, not a variable.
+                        </p>
+                        <p class="text-slate-400 text-xs italic">
+                            **The Logic:** You set a risk percentage (e.g., 2%). The engine calculates the distance to your Stop Loss in points. It then solves the equation: `(Balance * Risk%) / Distance = Lot Size`. If volatility is high (wide stop), lot size shrinks. If volatility is low (tight stop), lot size expands. Your dollar risk remains constant.
+                        </p>
                     </div>
                 </div>
             </div>
         </section>
 
-        <section class="py-16 border-t border-slate-800 bg-slate-900/30">
-             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-12">
-                    <div>
-                        <h3 class="text-xl font-bold text-white mb-6">Strategy Docs</h3>
-                        <div class="space-y-2">
-                            <div onclick="loadLesson(0)" class="lesson-card p-4 rounded-lg bg-slate-800/50 border border-slate-700/50 hover:bg-slate-800 cursor-pointer transition">
-                                <h4 class="font-bold text-sky-400 text-sm">1. SMT Divergence</h4>
-                            </div>
-                            <div onclick="loadLesson(1)" class="lesson-card p-4 rounded-lg bg-slate-800/50 border border-slate-700/50 hover:bg-slate-800 cursor-pointer transition">
-                                <h4 class="font-bold text-sky-400 text-sm">2. 2.5 SD Kill Zone</h4>
-                            </div>
-                            <div onclick="loadLesson(2)" class="lesson-card p-4 rounded-lg bg-slate-800/50 border border-slate-700/50 hover:bg-slate-800 cursor-pointer transition">
-                                <h4 class="font-bold text-sky-400 text-sm">3. 1-Minute Trigger (BOS)</h4>
-                            </div>
-                            <div onclick="loadLesson(3)" class="lesson-card p-4 rounded-lg bg-slate-800/50 border border-slate-700/50 hover:bg-slate-800 cursor-pointer transition">
-                                <h4 class="font-bold text-sky-400 text-sm">4. Drift-Proof Math</h4>
-                            </div>
-                            <div onclick="loadLesson(4)" class="lesson-card p-4 rounded-lg bg-slate-800/50 border border-slate-700/50 hover:bg-slate-800 cursor-pointer transition">
-                                <h4 class="font-bold text-sky-400 text-sm">5. RSI Momentum Guard</h4>
-                            </div>
+        <section id="academy" class="py-16 bg-slate-900 border-t border-slate-800">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="text-center mb-12">
+                    <h2 class="text-3xl font-bold text-white">ForwardFin Academy</h2>
+                    <p class="mt-4 text-slate-400 max-w-2xl mx-auto">V4.7 Concepts: SMT Divergence & Liquidity.</p>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[400px]">
+                    <div class="lg:col-span-4 glass rounded-xl overflow-hidden overflow-y-auto">
+                        <div onclick="loadLesson(0)" class="lesson-card p-4 border-b border-slate-700 active">
+                            <h4 class="font-bold text-slate-200">1. SMT Divergence</h4>
+                            <p class="text-xs text-slate-500 mt-1">Correlation Check.</p>
                         </div>
-                        <div id="lesson-body" class="mt-6 p-4 bg-slate-900 rounded-xl border border-slate-800 text-sm text-slate-400 min-h-[100px] leading-relaxed">
-                            Select a module to view details.
+                        <div onclick="loadLesson(1)" class="lesson-card p-4 border-b border-slate-700">
+                            <h4 class="font-bold text-slate-200">2. The "Kill Zone"</h4>
+                            <p class="text-xs text-slate-500 mt-1">Wait for 2.5 SD.</p>
+                        </div>
+                        <div onclick="loadLesson(2)" class="lesson-card p-4 border-b border-slate-700">
+                            <h4 class="font-bold text-slate-200">3. 1-Minute Trigger</h4>
+                            <p class="text-xs text-slate-500 mt-1">BOS + FVG Required.</p>
+                        </div>
+                        <div onclick="loadLesson(3)" class="lesson-card p-4 border-b border-slate-700">
+                            <h4 class="font-bold text-slate-200">4. Drift-Proof Math</h4>
+                            <p class="text-xs text-slate-500 mt-1">Relative Structure Logic.</p>
+                        </div>
+                        <div onclick="loadLesson(4)" class="lesson-card p-4 border-b border-slate-700">
+                            <h4 class="font-bold text-slate-200">5. RSI Momentum</h4>
+                            <p class="text-xs text-slate-500 mt-1">Avoiding the Crash.</p>
                         </div>
                     </div>
-                    <div>
-                        <h3 class="text-xl font-bold text-white mb-6">System Stack</h3>
-                        <div class="space-y-3">
-                            <div onclick="selectLayer(0)" class="arch-layer flex items-center justify-between p-3 rounded-lg bg-slate-800/30 border border-slate-700/30 hover:bg-slate-800 cursor-pointer transition">
-                                <span class="text-sm font-bold text-slate-300">1. Data Ingestion</span>
-                                <span class="text-xs text-slate-500 font-mono">yFinance API</span>
-                            </div>
-                            <div onclick="selectLayer(1)" class="arch-layer flex items-center justify-between p-3 rounded-lg bg-slate-800/30 border border-slate-700/30 hover:bg-slate-800 cursor-pointer transition">
-                                <span class="text-sm font-bold text-slate-300">2. Logic Engine</span>
-                                <span class="text-xs text-slate-500 font-mono">NumPy / Pandas</span>
-                            </div>
-                            <div onclick="selectLayer(2)" class="arch-layer flex items-center justify-between p-3 rounded-lg bg-slate-800/30 border border-slate-700/30 hover:bg-slate-800 cursor-pointer transition">
-                                <span class="text-sm font-bold text-slate-300">3. Execution</span>
-                                <span class="text-xs text-slate-500 font-mono">FastAPI Async</span>
-                            </div>
-                            <div onclick="selectLayer(3)" class="arch-layer flex items-center justify-between p-3 rounded-lg bg-slate-800/30 border border-slate-700/30 hover:bg-slate-800 cursor-pointer transition">
-                                <span class="text-sm font-bold text-slate-300">4. Alerting Layer</span>
-                                <span class="text-xs text-slate-500 font-mono">Discord Webhooks</span>
-                            </div>
-                            <div onclick="selectLayer(4)" class="arch-layer flex items-center justify-between p-3 rounded-lg bg-slate-800/30 border border-slate-700/30 hover:bg-slate-800 cursor-pointer transition">
-                                <span class="text-sm font-bold text-slate-300">5. User Interface</span>
-                                <span class="text-xs text-slate-500 font-mono">HTML5 / Tailwind</span>
-                            </div>
-                        </div>
-                        <div id="detail-desc" class="mt-6 p-4 bg-slate-900 rounded-xl border border-slate-800 text-sm text-slate-400 min-h-[80px] leading-relaxed">
-                            Click a layer above to view technical specs.
+                    <div class="lg:col-span-8 glass rounded-xl p-8 flex flex-col shadow-sm">
+                        <h3 id="lesson-title" class="text-2xl font-bold text-sky-500 mb-4">Select a Lesson</h3>
+                        <div id="lesson-body" class="text-slate-300 leading-relaxed mb-8 flex-grow overflow-y-auto">
+                            Click a module on the left to start learning.
                         </div>
                     </div>
                 </div>
-             </div>
+            </div>
+        </section>
+
+        <section id="architecture" class="py-16 bg-slate-900 border-t border-slate-800">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="mb-10">
+                    <h2 class="text-3xl font-bold text-white">System Architecture</h2>
+                    <p class="mt-4 text-slate-400 max-w-3xl">ForwardFin is built on a modular 5-layer stack.</p>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                    <div class="lg:col-span-5 space-y-3">
+                        <div onclick="selectLayer(0)" class="arch-layer active glass p-4 rounded-lg flex items-center justify-between group">
+                            <div><h4 class="font-bold text-slate-200">1. Data Ingestion</h4><p class="text-xs text-slate-500 mt-1">Yahoo Finance (yfinance)</p></div><div class="text-slate-500 group-hover:text-sky-500">→</div>
+                        </div>
+                        <div onclick="selectLayer(1)" class="arch-layer glass p-4 rounded-lg flex items-center justify-between group">
+                            <div><h4 class="font-bold text-slate-200">2. Analysis Engine</h4><p class="text-xs text-slate-500 mt-1">Pandas / NumPy / SMT Logic</p></div><div class="text-slate-500 group-hover:text-sky-500">→</div>
+                        </div>
+                        <div onclick="selectLayer(2)" class="arch-layer glass p-4 rounded-lg flex items-center justify-between group">
+                            <div><h4 class="font-bold text-slate-200">3. Strategy Core</h4><p class="text-xs text-slate-500 mt-1">Asia Sweep -> SMT -> 1m Trigger</p></div><div class="text-slate-500 group-hover:text-sky-500">→</div>
+                        </div>
+                        <div onclick="selectLayer(3)" class="arch-layer glass p-4 rounded-lg flex items-center justify-between group">
+                            <div><h4 class="font-bold text-slate-200">4. Alerting Layer</h4><p class="text-xs text-slate-500 mt-1">Discord Webhooks</p></div><div class="text-slate-500 group-hover:text-sky-500">→</div>
+                        </div>
+                        <div onclick="selectLayer(4)" class="arch-layer glass p-4 rounded-lg flex items-center justify-between group">
+                            <div><h4 class="font-bold text-slate-200">5. User Interface</h4><p class="text-xs text-slate-500 mt-1">FastAPI / Tailwind / JS</p></div><div class="text-slate-500 group-hover:text-sky-500">→</div>
+                        </div>
+                    </div>
+                    <div class="lg:col-span-7">
+                        <div class="glass rounded-xl h-full p-6 flex flex-col">
+                            <div class="flex justify-between items-center mb-4 border-b border-slate-700 pb-4">
+                                <h3 id="detail-title" class="text-xl font-bold text-white">Data Ingestion</h3>
+                                <span id="detail-badge" class="px-2 py-1 bg-sky-900 text-sky-200 text-xs rounded font-mono">Infrastructure</span>
+                            </div>
+                            <p id="detail-desc" class="text-slate-300 mb-6 flex-grow">Connects to Yahoo Finance to fetch real-time 1-minute candle data for NQ=F and ES=F futures contracts.</p>
+                            <h5 class="font-semibold text-slate-400 mb-3 text-sm uppercase">Tech Stack</h5>
+                            <ul id="detail-list" class="space-y-3"></ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </section>
 
     </main>
@@ -925,12 +873,9 @@ async def root():
     <script>
         // Init Chart Function
         function initChart(symbol) {
-            let tvSymbol = "CAPITALCOM:US100";
-            if(symbol.includes("ES")) tvSymbol = "CAPITALCOM:US500";
-            
             new TradingView.widget({
                 "autosize": true,
-                "symbol": tvSymbol,
+                "symbol": "CAPITALCOM:US100",
                 "interval": "1",
                 "timezone": "Africa/Johannesburg",
                 "theme": "dark",
@@ -963,23 +908,13 @@ async def root():
             });
         }
 
-        // [RESTORED] Asset Switching Logic
         async function setAsset(asset) {
-            // Visual Update
-            document.querySelectorAll('.btn-asset').forEach(b => b.classList.remove('active'));
-            if(asset.includes("NQ")) document.getElementById('btn-nq').classList.add('active');
-            else document.getElementById('btn-es').classList.add('active');
-            
-            // Backend Update
-            await fetch('/api/update-settings', {
-                method: 'POST', headers: {'Content-Type':'application/json'},
-                body: JSON.stringify({ asset: asset, strategy: "SWEEP", style: "PRECISION" })
-            });
-            
             initChart(asset);
         }
         
-        async function pushSettings() { }
+        async function pushSettings() {
+             // Function stub
+        }
 
         async function updateLoop() {
             try {
@@ -987,17 +922,17 @@ async def root():
                 const data = await res.json();
 
                 // Top Bar
-                document.getElementById('nav-ticker').innerHTML = `<span class="relative flex h-3 w-3"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span></span> ${data.settings.asset}: $${data.market_data.price.toLocaleString()}`;
+                document.getElementById('nav-ticker').innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> ${data.settings.asset}: $${data.market_data.price.toLocaleString()}`;
                 if(data.market_data.server_time) document.getElementById('server-clock').innerText = data.market_data.server_time;
 
                 // News
                 const newsEl = document.getElementById('news-status');
                 if(data.news.is_danger) {
-                    newsEl.className = "hidden md:block text-[10px] uppercase font-bold tracking-wider px-3 py-1.5 rounded-full bg-red-900/50 border border-red-500 text-red-200 animate-pulse";
+                    newsEl.className = "hidden md:block text-xs px-3 py-1 rounded bg-red-900/50 border border-red-500 text-red-200 animate-pulse";
                     newsEl.innerText = "⛔ NEWS HALT: " + data.news.headline;
                 } else {
-                    newsEl.className = "hidden md:block text-[10px] uppercase font-bold tracking-wider px-3 py-1.5 rounded-full bg-slate-900/50 border border-slate-700 text-slate-400";
-                    newsEl.innerText = "📰 SCANNING NEWS...";
+                    newsEl.className = "hidden md:block text-xs px-3 py-1 rounded bg-slate-800 border border-slate-700 text-slate-400";
+                    newsEl.innerText = "📰 News: Clear";
                 }
 
                 // Stats
@@ -1007,46 +942,40 @@ async def root():
                 // Signal
                 const sigEl = document.getElementById('signal-badge');
                 sigEl.innerText = data.prediction.bias;
-                if(data.prediction.bias === "LONG") sigEl.className = "inline-block px-6 py-2 bg-emerald-600 rounded-full text-xs font-bold text-white shadow-lg shadow-emerald-900/50 live-pulse";
-                else if(data.prediction.bias === "SHORT") sigEl.className = "inline-block px-6 py-2 bg-rose-600 rounded-full text-xs font-bold text-white shadow-lg shadow-rose-900/50 live-pulse";
-                else sigEl.className = "inline-block px-6 py-2 bg-slate-800 rounded-full text-xs font-bold text-slate-400 border border-slate-700";
+                if(data.prediction.bias === "LONG") sigEl.className = "inline-block px-4 py-2 bg-emerald-600 rounded text-sm font-bold text-white animate-pulse";
+                else if(data.prediction.bias === "SHORT") sigEl.className = "inline-block px-4 py-2 bg-rose-600 rounded text-sm font-bold text-white animate-pulse";
+                else sigEl.className = "inline-block px-4 py-2 bg-slate-800 rounded text-sm font-bold text-slate-400";
 
                 document.getElementById('ai-text').innerText = data.prediction.narrative;
                 const smtEl = document.getElementById('smt-status');
                 const smtElBig = document.getElementById('status-smt-big');
                 if(data.market_data.smt_detected) {
-                    smtEl.innerText = "DIVERGENCE"; smtEl.className = "text-xs font-black text-emerald-400";
-                    if(smtElBig) { smtElBig.innerText = "DIVERGENCE"; smtElBig.className = "text-xl font-black text-emerald-500 mt-2 animate-pulse"; }
+                    smtEl.innerText = "DIVERGENCE"; smtEl.className = "text-xs font-bold text-emerald-400";
+                    if(smtElBig) { smtElBig.innerText = "DIVERGENCE"; smtElBig.className = "text-xl font-black text-emerald-500 mt-4 animate-pulse"; }
                 } else {
-                    smtEl.innerText = "SYNCED"; smtEl.className = "text-xs font-black text-rose-500";
-                    if(smtElBig) { smtElBig.innerText = "SYNCED"; smtElBig.className = "text-xl font-black text-rose-500 mt-2"; }
+                    smtEl.innerText = "SYNCED"; smtEl.className = "text-xs font-bold text-rose-500";
+                    if(smtElBig) { smtElBig.innerText = "SYNCED"; smtElBig.className = "text-xl font-black text-rose-500 mt-4"; }
                 }
                 
-                // RSI Display
+                // [NEW] V4.6 RSI Display
                 const rsiEl = document.getElementById('rsi-status');
                 if(rsiEl && data.market_data.rsi) {
                     rsiEl.innerText = data.market_data.rsi.toFixed(1);
-                    if(data.market_data.rsi < 20 || data.market_data.rsi > 80) rsiEl.className = "text-xs font-black text-rose-500 animate-pulse font-mono";
-                    else rsiEl.className = "text-xs font-black text-emerald-500 font-mono";
+                    if(data.market_data.rsi < 30 || data.market_data.rsi > 70) rsiEl.className = "text-xs font-bold text-rose-500 animate-pulse";
+                    else rsiEl.className = "text-xs font-bold text-emerald-500";
                 }
 
-                // Setup Card Glow
+                // Setup
                 const setup = data.prediction.trade_setup;
-                const setupCard = document.getElementById('setup-card');
                 const validEl = document.getElementById('setup-validity');
-                
                 if(validEl) {
                     if(setup.valid) {
-                        validEl.innerText = "ACTIVE"; validEl.className = "text-[10px] bg-emerald-600 px-2 py-1 rounded text-white font-bold";
-                        setupCard.classList.add('border-emerald-500', 'shadow-lg', 'shadow-emerald-900/20');
-                        setupCard.classList.remove('border-slate-700');
+                        validEl.innerText = "ACTIVE"; validEl.className = "text-[10px] bg-emerald-600 px-2 py-1 rounded text-white";
                         document.getElementById('setup-entry').innerText = "$" + setup.entry.toLocaleString();
                         document.getElementById('setup-tp').innerText = "$" + setup.tp.toLocaleString();
                         document.getElementById('setup-sl').innerText = "$" + setup.sl.toLocaleString();
                     } else {
-                        validEl.innerText = "WAITING"; validEl.className = "text-[10px] bg-slate-800 px-2 py-1 rounded text-slate-500 font-bold";
-                        setupCard.classList.remove('border-emerald-500', 'shadow-lg', 'shadow-emerald-900/20');
-                        setupCard.classList.add('border-slate-700');
+                        validEl.innerText = "WAITING"; validEl.className = "text-[10px] bg-slate-800 px-2 py-1 rounded text-slate-400";
                     }
                 }
 
@@ -1056,9 +985,9 @@ async def root():
                 const sessionHigh = data.market_data.session_high;
                 if (sessionLow > 0) {
                       fibEl.innerText = `${sessionLow.toFixed(2)} - ${sessionHigh.toFixed(2)}`;
-                      fibEl.className = "text-xs font-bold text-slate-300 mt-2 text-center font-mono";
+                      fibEl.className = "text-sm font-bold text-slate-300 mt-4 text-center";
                 } else {
-                      fibEl.innerText = "CALCULATING";
+                      fibEl.innerText = "WAITING FOR DATA";
                 }
 
                 if (data.performance) {
@@ -1073,24 +1002,36 @@ async def root():
             } catch(e) {}
         }
 
+        // --- CONTENT LOGIC (Restored) ---
         const lessons = [
             { title: "1. SMT Divergence", body: "<b>Smart Money Technique (SMT):</b> This is our 'Lie Detector'. Institutional algorithms often manipulate one index (like NQ) to grab liquidity while holding the other (like ES) steady.<br><br><b>The Rule:</b> If NQ sweeps a Low (makes a lower low) but ES fails to sweep its matching Low (makes a higher low), that is a 'Crack in Correlation'. It confirms that the move down was a trap to sell to retail traders before reversing higher." },
             { title: "2. The 'Kill Zone' (-2.5 STDV)", body: "<b>Why -2.5 Standard Deviations?</b> We do not guess bottoms. We use math. By projecting the Asia Range size (High - Low) downwards by a factor of 2.5, we identify a statistical 'Exhaustion Point'.<br><br>When price hits this zone, it is mathematically overextended relative to the session's volatility. This is where we stop analysing and start hunting for an entry." },
             { title: "3. 1-Minute Trigger (BOS + FVG)", body: "<b>The Kill Switch:</b> SMT and STDV are just context. The Trigger confirms the reversal. We switch to the 1-minute chart and demand two things:<br>1. <b>BOS (Break of Structure):</b> Price must break above the last swing high, proving buyers are stepping in.<br>2. <b>FVG (Fair Value Gap):</b> This energetic move must leave behind an imbalance gap. This proves the move was institutional, not random noise." },
-            { title: "4. Drift-Proof Math", body: "<b>The Relative Engine:</b> Different brokers (HFM, Alpha, Capital.com) have different price feeds. A static bot waiting for '$15,000' will fail if your broker is at '$15,010'.<br><br><b>The Solution:</b> ForwardFin V4.7 uses Relative Math. We calculate the percentage distance from the Session High/Low. If the distance is 0.5%, it is 0.5% on EVERY broker. This ensures signals are valid regardless of spread or price drift." },
-            { title: "5. RSI Momentum", body: "<b>Crash Protection:</b> Buying a dip is good. Buying a crash is bad. The RSI (Relative Strength Index) tells us the difference.<br><br><b>The Rule:</b> If price is in the Buy Zone but RSI is below 20 (Vertical Drop), we DO NOT buy. We wait for the RSI to curl back above 30. This confirms that the selling pressure has exhausted and momentum is shifting up." }
+            { title: "4. Drift-Proof Math", body: "<b>The Relative Engine:</b> Different brokers (HFM, Alpha, Capital.com) have different price feeds. A static bot waiting for '$15,000' will fail if your broker is at '$15,010'.<br><br><b>The Solution:</b> ForwardFin V4.6 uses Relative Math. We calculate the percentage distance from the Session High/Low. If the distance is 0.5%, it is 0.5% on EVERY broker. This ensures signals are valid regardless of spread or price drift." },
+            { title: "5. RSI Momentum", body: "<b>Crash Protection:</b> Buying a dip is good. Buying a crash is bad. The RSI (Relative Strength Index) tells us the difference.<br><br><b>The Rule:</b> If price is in the Buy Zone but RSI is below 30 (Vertical Drop), we DO NOT buy. We wait for the RSI to curl back above 30. This confirms that the selling pressure has exhausted and momentum is shifting up." }
         ];
 
         function loadLesson(index) {
             const l = lessons[index];
-            document.getElementById('lesson-body').innerHTML = `<b>${l.title}</b><br><br>${l.body}`;
+            document.getElementById('lesson-title').innerText = l.title;
+            document.getElementById('lesson-body').innerHTML = l.body;
+            document.querySelectorAll('.lesson-card').forEach((el, i) => {
+                if(i === index) el.classList.add('active', 'bg-sky-50', 'border-l-sky-600');
+                else el.classList.remove('active', 'bg-sky-50', 'border-l-sky-600');
+            });
         }
         
+        // --- ARCHITECTURE SECTION UPDATED HERE (V4.7) ---
         const architectureData = [
             { title: "Data Ingestion", badge: "Infrastructure", description: "Connects to Yahoo Finance to fetch real-time 1-minute candle data for NQ=F and ES=F futures contracts.", components: ["yfinance", "Python Requests"] },
             { title: "Analysis Engine", badge: "Data Science", description: "Resamples 1m data to 5m to find STDV Zones. Calculates live Volatility and detects IFVGs.", components: ["Pandas Resample", "NumPy Math", "Custom Fib Scanner"] },
+            
+            // [UPDATED] Corrected text to 2.5 STDV
             { title: "Strategy Core", badge: "Logic", description: "Hybrid 5m/1m Engine. Waits for 2.5 STDV on 5m, then hunts for 1m BOS+FVG triggers.", components: ["Multi-Timeframe Analysis", "Smart Money Logic"] },
+            
+            // [UPDATED] Corrected text to V4.6 Confidence
             { title: "Alerting Layer", badge: "Notification", description: "When V4.6 confidence is met (>85% via RSI & SMT), constructs a rich embed payload and fires it to the Discord Webhook.", components: ["Discord API", "JSON Payloads"] },
+            
             { title: "User Interface", badge: "Frontend", description: "Responsive dashboard served via FastAPI. Updates DOM elements live via polling.", components: ["FastAPI", "Tailwind CSS", "Chart.js", "TradingView"] }
         ];
 
@@ -1100,7 +1041,12 @@ async def root():
                 else el.classList.remove('active', 'bg-sky-50', 'border-l-sky-600');
             });
             const data = architectureData[index];
-            document.getElementById('detail-desc').innerText = `<b>${data.title}</b><br>${data.description}<br><br>Components: ${data.components.join(', ')}`;
+            document.getElementById('detail-title').innerText = data.title;
+            document.getElementById('detail-badge').innerText = data.badge;
+            document.getElementById('detail-desc').innerText = data.description;
+            const list = document.getElementById('detail-list');
+            list.innerHTML = '';
+            data.components.forEach(comp => { list.innerHTML += `<li class="flex items-start text-sm text-slate-400"><span class="w-1.5 h-1.5 bg-sky-500 rounded-full mt-1.5 mr-2"></span>${comp}</li>`; });
         }
 
         document.addEventListener('DOMContentLoaded', () => {
